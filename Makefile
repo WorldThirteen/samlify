@@ -8,7 +8,7 @@ clean:	;
 
 rebuild: ;
 	       rm -rf build; \
-				 tsc; \
+				 npx tsc; \
 
 pretest:	;
 					mkdir -p build/test; \
