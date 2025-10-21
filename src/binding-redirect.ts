@@ -60,7 +60,26 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
     relayState = pvPair(urlParams.relayState, encodeURIComponent(relayState));
   }
   if (isSigned) {
-    const sigAlg = pvPair(urlParams.sigAlg, encodeURIComponent(entitySetting.requestSignatureAlgorithm));
+    // Detect key type to determine the correct signature algorithm
+    const keyString = Buffer.isBuffer(entitySetting.privateKey) 
+      ? entitySetting.privateKey.toString('utf8') 
+      : entitySetting.privateKey;
+    const keyType = utility.detectKeyType(keyString);
+    
+    // Use EC algorithm if key is EC, otherwise use the configured algorithm
+    let signatureAlgorithm = entitySetting.requestSignatureAlgorithm;
+    if (keyType === 'EC' && signatureAlgorithm.includes('rsa')) {
+      // Convert RSA algorithm to equivalent ECDSA algorithm
+      if (signatureAlgorithm.includes('sha512')) {
+        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512';
+      } else if (signatureAlgorithm.includes('sha384')) {
+        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384';
+      } else {
+        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256';
+      }
+    }
+    
+    const sigAlg = pvPair(urlParams.sigAlg, encodeURIComponent(signatureAlgorithm));
     const octetString = samlRequest + relayState + sigAlg;
     return baseUrl
       + pvPair(queryParam, octetString, noParams)
@@ -70,7 +89,7 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
           entitySetting.privateKey,
           entitySetting.privateKeyPass,
           undefined,
-          entitySetting.requestSignatureAlgorithm
+          signatureAlgorithm
         ).toString()
       )
       );

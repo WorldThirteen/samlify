@@ -150,29 +150,29 @@ test('getAssertionConsumerService with two bindings', t => {
   test('sign a SAML message with RSA-SHA512', t => {
     t.is(libsaml.constructMessageSignature(octetStringSHA512, _spPrivPem, _spPrivKeyPass, undefined, signatureAlgorithms.RSA_SHA512).toString('base64'), signatureB64SHA512);
   });
-  test('verify binary SAML message signed with RSA-SHA1', t => {
+  test('verify binary SAML message signed with RSA-SHA1', async t => {
     const signature = libsaml.constructMessageSignature(octetString, _spPrivPem, _spPrivKeyPass, false);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetString, signature), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetString, signature), true);
   });
-  test('verify binary SAML message signed with RSA-SHA256', t => {
+  test('verify binary SAML message signed with RSA-SHA256', async t => {
     const signature = libsaml.constructMessageSignature(octetStringSHA256, _spPrivPem, _spPrivKeyPass, false, signatureAlgorithms.RSA_SHA256);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetStringSHA256, signature, signatureAlgorithms.RSA_SHA256), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetStringSHA256, signature, signatureAlgorithms.RSA_SHA256), true);
   });
-  test('verify binary SAML message signed with RSA-SHA512', t => {
+  test('verify binary SAML message signed with RSA-SHA512', async t => {
     const signature = libsaml.constructMessageSignature(octetStringSHA512, _spPrivPem, _spPrivKeyPass, false, signatureAlgorithms.RSA_SHA512);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetStringSHA512, signature, signatureAlgorithms.RSA_SHA512), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetStringSHA512, signature, signatureAlgorithms.RSA_SHA512), true);
   });
-  test('verify stringified SAML message signed with RSA-SHA1', t => {
+  test('verify stringified SAML message signed with RSA-SHA1', async t => {
     const signature = libsaml.constructMessageSignature(octetString, _spPrivPem, _spPrivKeyPass);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetString, Buffer.from(signature.toString(), 'base64')), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetString, Buffer.from(signature.toString(), 'base64')), true);
   });
-  test('verify stringified SAML message signed with RSA-SHA256', t => {
+  test('verify stringified SAML message signed with RSA-SHA256', async t => {
     const signature = libsaml.constructMessageSignature(octetStringSHA256, _spPrivPem, _spPrivKeyPass);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetStringSHA256, Buffer.from(signature.toString(), 'base64')), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetStringSHA256, Buffer.from(signature.toString(), 'base64')), true);
   });
-  test('verify stringified SAML message signed with RSA-SHA512', t => {
+  test('verify stringified SAML message signed with RSA-SHA512', async t => {
     const signature = libsaml.constructMessageSignature(octetStringSHA512, _spPrivPem, _spPrivKeyPass);
-    t.is(libsaml.verifyMessageSignature(SPMetadata, octetStringSHA512, Buffer.from(signature.toString(), 'base64')), true);
+    t.is(await libsaml.verifyMessageSignature(SPMetadata, octetStringSHA512, Buffer.from(signature.toString(), 'base64')), true);
   });
   test('construct signature with RSA-SHA1', t => {
     t.is(libsaml.constructSAMLSignature({

@@ -113,7 +113,7 @@ async function redirectFlow(options): Promise<FlowResult>  {
     const base64Signature = Buffer.from(decodeURIComponent(signature), 'base64');
     const decodeSigAlg = decodeURIComponent(sigAlg);
 
-    const verified = libsaml.verifyMessageSignature(targetEntityMetadata, octetString, base64Signature, sigAlg);
+    const verified = await libsaml.verifyMessageSignature(targetEntityMetadata, octetString, base64Signature, sigAlg);
 
     if (!verified) {
       // Fail to verify message signature
@@ -358,7 +358,7 @@ async function postSimpleSignFlow(options): Promise<FlowResult> {
     // put the below two assignments into verifyMessageSignature function
     const base64Signature = Buffer.from(signature, 'base64');
 
-    const verified = libsaml.verifyMessageSignature(targetEntityMetadata, octetString, base64Signature, sigAlg);
+    const verified = await libsaml.verifyMessageSignature(targetEntityMetadata, octetString, base64Signature, sigAlg);
 
     if (!verified) {
       // Fail to verify message signature

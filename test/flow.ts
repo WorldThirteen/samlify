@@ -252,7 +252,7 @@ test('create login request with redirect binding using [custom template]', t => 
   (id === 'exposed_testing_id' && isString(context)) ? t.pass() : t.fail();
 });
 
-test('create login request with redirect binding signing with unencrypted PKCS#8', t => {
+test('create login request with redirect binding signing with unencrypted PKCS#8', async t => {
   const _sp = serviceProvider({
     authnRequestsSigned: true,
     signingCert: readFileSync('./test/key/sp/cert.unencrypted.pkcs8.cer'),
@@ -265,11 +265,11 @@ test('create login request with redirect binding signing with unencrypted PKCS#8
   const parsed = parseRedirectUrlContextCallBack(context)
   const signature =  Buffer.from(parsed.query.Signature as string, 'base64');
 
-  const valid = libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
+  const valid = await libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
   t.true(valid, 'signature did not validate');
 });
 
-test('create login request with redirect binding signing with encrypted PKCS#8', t => {
+test('create login request with redirect binding signing with encrypted PKCS#8', async t => {
   const _sp = serviceProvider({
     authnRequestsSigned: true,
     signingCert: readFileSync('./test/key/sp/cert.encrypted.pkcs8.cer'),
@@ -282,11 +282,11 @@ test('create login request with redirect binding signing with encrypted PKCS#8',
   const parsed = parseRedirectUrlContextCallBack(context)
   const signature =  Buffer.from(parsed.query.Signature as string, 'base64');
 
-  const valid = libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
+  const valid = await libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
   t.true(valid, 'signature did not validate');
 });
 
-test('create login request with redirect binding signing with unencrypted EC PKCS#8', t => {
+test('create login request with redirect binding signing with unencrypted EC PKCS#8', async t => {
   const _sp = serviceProvider({
     authnRequestsSigned: true,
     signingCert: readFileSync('./test/key/sp/eccert.unencrypted.pkcs8.cer'),
@@ -299,11 +299,11 @@ test('create login request with redirect binding signing with unencrypted EC PKC
   const parsed = parseRedirectUrlContextCallBack(context)
   const signature =  Buffer.from(parsed.query.Signature as string, 'base64');
 
-  const valid = libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
+  const valid = await libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
   t.true(valid, 'signature did not validate');
 });
 
-test('create login request with redirect binding signing with encrypted EC PKCS#8', t => {
+test('create login request with redirect binding signing with encrypted EC PKCS#8', async t => {
   const _sp = serviceProvider({
     authnRequestsSigned: true,
     signingCert: readFileSync('./test/key/sp/eccert.encrypted.pkcs8.cer'),
@@ -316,7 +316,7 @@ test('create login request with redirect binding signing with encrypted EC PKCS#
   const parsed = parseRedirectUrlContextCallBack(context)
   const signature =  Buffer.from(parsed.query.Signature as string, 'base64');
 
-  const valid = libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
+  const valid = await libsaml.verifyMessageSignature(_sp.entityMeta, parsed.octetString, signature, parsed.query.SigAlg as string);
   t.true(valid, 'signature did not validate');
 });
 

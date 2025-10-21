@@ -8,7 +8,7 @@ clean:	;
 
 rebuild: ;
 	       rm -rf build; \
-				 npx tsc; \
+				 npx tsc --skipLibCheck; \
 
 pretest:	;
 					mkdir -p build/test; \

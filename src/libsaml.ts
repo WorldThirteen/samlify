@@ -10,6 +10,7 @@ import { select } from 'xpath';
 import { MetadataInterface } from './metadata';
 import nrsa, { SigningSchemeHash } from 'node-rsa';
 import { SignedXml } from 'xml-crypto';
+import * as xmldsigjs from 'xmldsigjs';
 import * as xmlenc from '@authenio/xml-encryption';
 import { extract } from './extractor';
 import camelCase from 'camelcase';
@@ -17,6 +18,14 @@ import { getContext } from './api';
 import xmlEscape from 'xml-escape';
 import * as fs from 'fs';
 import {DOMParser} from '@xmldom/xmldom';
+import { Crypto } from '@peculiar/webcrypto';
+import * as x509 from '@peculiar/x509';
+import { verifyMessageSignature } from './verify';
+import * as nodeCrypto from 'crypto';
+
+const crypto = new Crypto();
+
+xmldsigjs.Application.setEngine('NodeJS', crypto);
 
 const signatureAlgorithms = algorithms.signature;
 const digestAlgorithms = algorithms.digest;
@@ -96,7 +105,7 @@ export interface LibSamlInterface {
   constructSAMLSignature: (opts: SignatureConstructor) => string;
   verifySignature: (xml: string, opts: SignatureVerifierOptions) => [boolean, any];
   createKeySection: (use: KeyUse, cert: string | Buffer) => {};
-  constructMessageSignature: (octetString: string, key: string, passphrase?: string, isBase64?: boolean, signingAlgorithm?: string) => string;
+  constructMessageSignature: (octetString: string, key: string | Buffer, passphrase?: string, isBase64?: boolean, signingAlgorithm?: string) => string;
 
   verifyMessageSignature: (metadata, octetString: string, signature: string | Buffer, verifyAlgorithm?: string) => boolean;
   getKeyInfo: (x509Certificate: string, signatureConfig?: any) => void;
@@ -312,6 +321,21 @@ const libSaml = () => {
     * @return {string} base64 encoded string
     */
     constructSAMLSignature(opts: SignatureConstructor) {
+      // Detect key type
+      const keyType = utility.detectKeyType(opts.privateKey);
+      
+      if (keyType === 'EC') {
+        // Use xmldsigjs for EC XML signatures
+        return this.constructECXMLSignature(opts);
+      } else {
+        // Use xml-crypto for RSA signatures
+        return this.constructRSAXMLSignature(opts);
+      }
+    },
+    /**
+    * @desc Construct RSA XML signature using xml-crypto
+    */
+    constructRSAXMLSignature(opts: SignatureConstructor) {
       const {
         rawSamlMessage,
         referenceTagXPath,
@@ -327,6 +351,7 @@ const libSaml = () => {
         isBase64Output = true,
         isMessageSigned = false,
       } = opts;
+
       const sig = new SignedXml();
       // Add assertion sections as reference
       const digestAlgorithm = getDigestMethod(signatureAlgorithm);
@@ -357,6 +382,14 @@ const libSaml = () => {
         sig.computeSignature(rawSamlMessage);
       }
       return isBase64Output !== false ? utility.base64Encode(sig.getSignedXml()) : sig.getSignedXml();
+    },
+    /**
+    * @desc Construct EC XML signature using xmldsigjs
+    */
+    constructECXMLSignature(opts: SignatureConstructor) {
+      // TODO: Implement EC XML signature support
+      // For now, throw an error indicating EC XML signatures are not yet implemented
+      throw new Error('EC XML signature construction is not yet implemented. Please use RSA keys for XML signatures or use message signatures with EC keys.');
     },
     /**
     * @desc Verify the XML signature
@@ -583,23 +616,144 @@ const libSaml = () => {
     */
     constructMessageSignature(
       octetString: string,
+      key: string | Buffer,
+      passphrase?: string,
+      isBase64?: boolean,
+      signingAlgorithm?: string
+    ) {
+      // Convert key to string if it's a Buffer
+      const keyString = Buffer.isBuffer(key) ? key.toString('utf8') : key;
+      
+      // Detect key type
+      const keyType = utility.detectKeyType(keyString);
+      
+      // If no algorithm specified, use default based on key type
+      let algorithm = signingAlgorithm;
+      if (!algorithm) {
+        algorithm = keyType === 'EC' ? signatureAlgorithms.ECDSA_SHA256 : signatureAlgorithms.RSA_SHA256;
+      } else if (keyType === 'EC' && algorithm.includes('rsa')) {
+        // If algorithm is RSA but key is EC, convert to equivalent ECDSA algorithm
+        if (algorithm.includes('sha512')) {
+          algorithm = signatureAlgorithms.ECDSA_SHA512;
+        } else if (algorithm.includes('sha384')) {
+          algorithm = signatureAlgorithms.ECDSA_SHA384;
+        } else {
+          algorithm = signatureAlgorithms.ECDSA_SHA256;
+        }
+      }
+      
+      if (keyType === 'EC') {
+        // Use Node's crypto module for EC signing (synchronous)
+        // For EC keys, don't use utility.readPrivateKey as it only works for RSA
+        const pemKey = isString(passphrase) 
+          ? keyString // Encrypted EC keys need to be passed directly
+          : keyString;
+        
+        // Determine hash algorithm from signing algorithm
+        let hashAlgorithm = 'SHA256';
+        if (algorithm.includes('sha384')) {
+          hashAlgorithm = 'SHA384';
+        } else if (algorithm.includes('sha512')) {
+          hashAlgorithm = 'SHA512';
+        } else if (algorithm.includes('sha1')) {
+          hashAlgorithm = 'SHA1';
+        }
+        
+        const sign = nodeCrypto.createSign(hashAlgorithm);
+        sign.update(octetString);
+        const signature = sign.sign({
+          key: pemKey,
+          format: 'pem',
+          type: 'pkcs8',
+          passphrase: passphrase
+        });
+        
+        return isBase64 !== false ? signature.toString('base64') : signature;
+      } else {
+        // Default RSA signing
+        // Default returning base64 encoded signature
+        // Embed with node-rsa module
+        const decryptedKey = new nrsa(
+          utility.readPrivateKey(keyString, passphrase),
+          undefined,
+          {
+            signingScheme: getSigningScheme(algorithm),
+          }
+        );
+        const signature = decryptedKey.sign(octetString);
+        // Use private key to sign data
+        return isBase64 !== false ? signature.toString('base64') : signature;
+      }
+    },
+    /**
+    * @desc Construct EC message signature using Web Crypto API
+    * @param  {string} octetString                message to sign
+    * @param  {string} key                        private key in PEM format
+    * @param  {string} passphrase                 passphrase for encrypted key [optional]
+    * @param  {boolean} isBase64                  return base64 encoded signature
+    * @param  {string} signingAlgorithm           signing algorithm
+    * @return {string} signature
+    */
+    constructECMessageSignature(
+      octetString: string,
       key: string,
       passphrase?: string,
       isBase64?: boolean,
       signingAlgorithm?: string
     ) {
-      // Default returning base64 encoded signature
-      // Embed with node-rsa module
-      const decryptedKey = new nrsa(
-        utility.readPrivateKey(key, passphrase),
-        undefined,
-        {
-          signingScheme: getSigningScheme(signingAlgorithm),
-        }
-      );
-      const signature = decryptedKey.sign(octetString);
-      // Use private key to sign data
-      return isBase64 !== false ? signature.toString('base64') : signature;
+      // Determine hash algorithm from signing algorithm
+      let hashAlgorithm = 'SHA-256';
+      if (signingAlgorithm?.includes('sha384')) {
+        hashAlgorithm = 'SHA-384';
+      } else if (signingAlgorithm?.includes('sha512')) {
+        hashAlgorithm = 'SHA-512';
+      } else if (signingAlgorithm?.includes('sha1')) {
+        hashAlgorithm = 'SHA-1';
+      }
+
+      // Prepare the private key for WebCrypto
+      const pemKey = utility.readPrivateKey(key, passphrase, true) as string;
+      
+      // Remove PEM headers and decode
+      const pemContents = pemKey
+        .replace(/-----BEGIN [^-]+-----/, '')
+        .replace(/-----END [^-]+-----/, '')
+        .replace(/\s+/g, '');
+      
+      const derKey = Buffer.from(pemContents, 'base64');
+
+      // Import the key
+      const algorithm: EcKeyImportParams = {
+        name: 'ECDSA',
+        namedCurve: 'P-256', // This will be auto-detected from the key
+      };
+
+      const keyData = new Uint8Array(derKey);
+
+      return crypto.subtle.importKey(
+        'pkcs8',
+        keyData,
+        algorithm,
+        false,
+        ['sign']
+      ).then(privateKey => {
+        // Sign the message
+        return crypto.subtle.sign(
+          {
+            name: 'ECDSA',
+            hash: hashAlgorithm
+          },
+          privateKey,
+          new TextEncoder().encode(octetString)
+        );
+      }).then(signature => {
+        // Convert ArrayBuffer to Buffer
+        const sigBuffer = Buffer.from(signature);
+        return isBase64 !== false ? sigBuffer.toString('base64') : sigBuffer;
+      }).catch(error => {
+        console.error('EC signing failed:', error);
+        throw new Error('Failed to sign with EC key: ' + error.message);
+      });
     },
     /**
     * @desc Verifies message signature
@@ -607,7 +761,7 @@ const libSaml = () => {
     * @param  {string} octetString                see "Bindings for the OASIS Security Assertion Markup Language (SAML V2.0)" P.17/46
     * @param  {string} signature                  context of XML signature
     * @param  {string} verifyAlgorithm            algorithm used to verify
-    * @return {boolean} verification result
+    * @return {Promise<boolean>} verification result
     */
     verifyMessageSignature(
       metadata,
@@ -615,10 +769,7 @@ const libSaml = () => {
       signature: string | Buffer,
       verifyAlgorithm?: string
     ) {
-      const signCert = metadata.getX509Certificate(certUse.signing);
-      const signingScheme = getSigningScheme(verifyAlgorithm);
-      const key = new nrsa(utility.getPublicKeyPemFromCertificate(signCert), 'public', { signingScheme });
-      return key.verify(Buffer.from(octetString), Buffer.from(signature));
+      return verifyMessageSignature(metadata, octetString, signature, verifyAlgorithm);
     },
     /**
     * @desc Get the public key in string format

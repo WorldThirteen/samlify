@@ -4,7 +4,12 @@
 * @desc  Library for some common functions (e.g. de/inflation, en/decoding)
 */
 import { pki, util, asn1 } from 'node-forge';
+import * as xmldsigjs from 'xmldsigjs';
+import * as x509 from '@peculiar/x509';
+import * as webcrypto from '@peculiar/webcrypto';
 import { inflate, deflate } from 'pako';
+
+const crypto = new webcrypto.Crypto();
 
 const BASE64_STR = 'base64';
 
@@ -210,6 +215,72 @@ export function notEmpty<TValue>(value: TValue | null | undefined): value is TVa
   return value !== null && value !== undefined;
 }
 
+export function detectCertAlg(cert: string | undefined): 'RSA' | 'EC' | null {
+  if (!cert) {
+    return null;
+  }
+
+  try {
+    const parsedCert = new x509.X509Certificate(cert);
+
+    switch (parsedCert.signatureAlgorithm.name.toUpperCase()) {
+      case 'RSASSA-PKCS1-V1_5':
+      case 'RSA-PSS':
+      case 'RSA-OAEP':
+        return 'RSA';
+      case 'ECDSA':
+      case 'ECDH':
+        return 'EC';
+      default:
+        return null;
+    }
+  } catch (Error) {
+    return null;
+  }
+}
+
+/**
+* @desc Detect if a private key or certificate is RSA or EC
+* @param keyOrCert {string | Buffer} PEM formatted key or certificate
+* @return {'RSA' | 'EC' | null} key type or null if unable to detect
+*/
+export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | 'EC' | null {
+  if (!keyOrCert) return null;
+  
+  // Convert Buffer to string if needed
+  const keyString = Buffer.isBuffer(keyOrCert) ? keyOrCert.toString('utf8') : keyOrCert;
+  
+  // Remove PEM headers/footers and whitespace
+  const pemContent = keyString
+    .replace(/-----BEGIN [^-]+-----/, '')
+    .replace(/-----END [^-]+-----/, '')
+    .replace(/\s+/g, '');
+    
+  try {
+    const der = Buffer.from(pemContent, 'base64');
+    
+    // PKCS#8 private key structure
+    // Check for EC key OID: 1.2.840.10045.2.1 (id-ecPublicKey)
+    // Check for RSA key OID: 1.2.840.113549.1.1.1 (rsaEncryption)
+    
+    // Simple check: look for EC OID in DER
+    const ecOid = Buffer.from([0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01]); // 1.2.840.10045.2.1
+    const rsaOid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]); // 1.2.840.113549.1.1.1
+    
+    if (der.includes(ecOid)) return 'EC';
+    if (der.includes(rsaOid)) return 'RSA';
+    
+    // Fallback: check header
+    if (keyOrCert.includes('EC PRIVATE KEY')) return 'EC';
+    if (keyOrCert.includes('RSA PRIVATE KEY') || keyOrCert.includes('PRIVATE KEY')) return 'RSA';
+    
+  } catch (e) {
+    // Ignore parsing errors
+  }
+  
+  return null;
+}
+
 const utility = {
   isString,
   base64Encode,
@@ -225,6 +296,7 @@ const utility = {
   readPrivateKey,
   convertToString,
   isNonEmptyArray,
+  detectKeyType,
 };
 
 export default utility;
