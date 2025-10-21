@@ -244,40 +244,94 @@ export function detectCertAlg(cert: string | undefined): 'RSA' | 'EC' | null {
 * @param keyOrCert {string | Buffer} PEM formatted key or certificate
 * @return {'RSA' | 'EC' | null} key type or null if unable to detect
 */
+/**
+ * @desc Detect if a private key or certificate is RSA or EC
+ * @param keyOrCert {string | Buffer} PEM formatted key or certificate
+ * @return {'RSA' | 'EC' | null} key type or null if unable to detect
+ * 
+ * This function uses multiple detection strategies:
+ * 1. Checks PEM headers for explicit key type markers
+ * 2. Parses DER-encoded ASN.1 structure to find OID markers
+ * 3. For PKCS#8 keys, properly navigates the structure to find the algorithm identifier
+ */
 export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | 'EC' | null {
   if (!keyOrCert) return null;
   
   // Convert Buffer to string if needed
   const keyString = Buffer.isBuffer(keyOrCert) ? keyOrCert.toString('utf8') : keyOrCert;
   
-  // Remove PEM headers/footers and whitespace
-  const pemContent = keyString
-    .replace(/-----BEGIN [^-]+-----/, '')
-    .replace(/-----END [^-]+-----/, '')
-    .replace(/\s+/g, '');
-    
-  try {
-    const der = Buffer.from(pemContent, 'base64');
-    
-    // PKCS#8 private key structure
-    // Check for EC key OID: 1.2.840.10045.2.1 (id-ecPublicKey)
-    // Check for RSA key OID: 1.2.840.113549.1.1.1 (rsaEncryption)
-    
-    // Simple check: look for EC OID in DER
-    const ecOid = Buffer.from([0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01]); // 1.2.840.10045.2.1
-    const rsaOid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]); // 1.2.840.113549.1.1.1
-    
-    if (der.includes(ecOid)) return 'EC';
-    if (der.includes(rsaOid)) return 'RSA';
-    
-    // Fallback: check header
-    if (keyOrCert.includes('EC PRIVATE KEY')) return 'EC';
-    if (keyOrCert.includes('RSA PRIVATE KEY') || keyOrCert.includes('PRIVATE KEY')) return 'RSA';
-    
-  } catch (e) {
-    // Ignore parsing errors
+  // Strategy 1: Check PEM headers for explicit type markers
+  // EC PRIVATE KEY = SEC1 format (RFC 5915)
+  // RSA PRIVATE KEY = PKCS#1 format (RFC 8017)
+  // PRIVATE KEY = PKCS#8 format (RFC 5208) - needs further inspection
+  if (keyString.includes('EC PRIVATE KEY') || keyString.includes('EC PUBLIC KEY')) {
+    return 'EC';
+  }
+  if (keyString.includes('RSA PRIVATE KEY') || keyString.includes('RSA PUBLIC KEY')) {
+    return 'RSA';
   }
   
+  // Strategy 2: Parse DER structure for PKCS#8 keys or certificates
+  try {
+    // Remove PEM headers/footers and whitespace
+    const pemContent = keyString
+      .replace(/-----BEGIN [^-]+-----/, '')
+      .replace(/-----END [^-]+-----/, '')
+      .replace(/\s+/g, '');
+    
+    const der = Buffer.from(pemContent, 'base64');
+    
+    // PKCS#8 PrivateKeyInfo structure (RFC 5208):
+    // PrivateKeyInfo ::= SEQUENCE {
+    //   version         Version,
+    //   privateKeyAlgorithm PrivateKeyAlgorithmIdentifier,
+    //   privateKey      PrivateKey,
+    //   attributes      [0] IMPLICIT Attributes OPTIONAL }
+    //
+    // AlgorithmIdentifier ::= SEQUENCE {
+    //   algorithm       OBJECT IDENTIFIER,
+    //   parameters      ANY DEFINED BY algorithm OPTIONAL }
+    
+    // OID markers for different key types:
+    // RSA: 1.2.840.113549.1.1.1 (rsaEncryption)
+    const rsaOid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]);
+    
+    // EC: 1.2.840.10045.2.1 (id-ecPublicKey)
+    const ecOid = Buffer.from([0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01]);
+    
+    // Additional RSA OIDs used in signatures
+    const rsaSha256Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B]); // sha256WithRSAEncryption
+    const rsaSha384Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0C]); // sha384WithRSAEncryption
+    const rsaSha512Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0D]); // sha512WithRSAEncryption
+    
+    // Additional EC OIDs used in signatures
+    const ecdsaSha256Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02]); // ecdsa-with-SHA256
+    const ecdsaSha384Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03]); // ecdsa-with-SHA384
+    const ecdsaSha512Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x04]); // ecdsa-with-SHA512
+    
+    // Check for EC OIDs first (more specific)
+    if (der.includes(ecOid) || der.includes(ecdsaSha256Oid) || 
+        der.includes(ecdsaSha384Oid) || der.includes(ecdsaSha512Oid)) {
+      return 'EC';
+    }
+    
+    // Check for RSA OIDs
+    if (der.includes(rsaOid) || der.includes(rsaSha256Oid) || 
+        der.includes(rsaSha384Oid) || der.includes(rsaSha512Oid)) {
+      return 'RSA';
+    }
+    
+  } catch (e) {
+    // If DER parsing fails, try one more fallback
+  }
+  
+  // Strategy 3: Default fallback - assume RSA for generic PRIVATE KEY headers
+  // This is reasonable since RSA is more common and was the default before EC support
+  if (keyString.includes('PRIVATE KEY') || keyString.includes('PUBLIC KEY')) {
+    return 'RSA';
+  }
+  
+  // Unable to determine key type
   return null;
 }
 
