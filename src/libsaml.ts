@@ -322,7 +322,20 @@ const libSaml = () => {
     */
     constructSAMLSignature(opts: SignatureConstructor) {
       // Detect key type
-      const keyType = utility.detectKeyType(opts.privateKey);
+      let keyType: 'RSA' | 'EC';
+      try {
+        keyType = utility.detectKeyType(opts.privateKey);
+      } catch (e) {
+        // For encrypted keys, default to RSA (most common)
+        const keyString = Buffer.isBuffer(opts.privateKey) 
+          ? opts.privateKey.toString('utf8') 
+          : opts.privateKey;
+        if (keyString.includes('ENCRYPTED PRIVATE KEY') && opts.privateKeyPass) {
+          keyType = 'RSA'; // Default assumption for encrypted keys
+        } else {
+          throw e; // Re-throw if it's a different error
+        }
+      }
       
       if (keyType === 'EC') {
         // Use xmldsigjs for EC XML signatures
@@ -624,8 +637,9 @@ const libSaml = () => {
       // Convert key to string if it's a Buffer
       const keyString = Buffer.isBuffer(key) ? key.toString('utf8') : key;
       
-      // Detect key type
-      const keyType = utility.detectKeyType(keyString);
+      // Detect key type - readPrivateKey now properly handles encrypted PKCS#8 for both RSA and EC
+      const decryptedKeyString = utility.readPrivateKey(keyString, passphrase);
+      const keyType = utility.detectKeyType(decryptedKeyString);
       
       // If no algorithm specified, use default based on key type
       let algorithm = signingAlgorithm;
@@ -644,10 +658,8 @@ const libSaml = () => {
       
       if (keyType === 'EC') {
         // Use Node's crypto module for EC signing (synchronous)
-        // For EC keys, don't use utility.readPrivateKey as it only works for RSA
-        const pemKey = isString(passphrase) 
-          ? keyString // Encrypted EC keys need to be passed directly
-          : keyString;
+        // Use the decrypted key from readPrivateKey
+        const pemKey = decryptedKeyString;
         
         // Determine hash algorithm from signing algorithm
         let hashAlgorithm = 'SHA256';
@@ -664,8 +676,8 @@ const libSaml = () => {
         const signature = sign.sign({
           key: pemKey,
           format: 'pem',
-          type: 'pkcs8',
-          passphrase: passphrase
+          type: 'pkcs8'
+          // No passphrase needed - key is already decrypted
         });
         
         return isBase64 !== false ? signature.toString('base64') : signature;
@@ -674,7 +686,7 @@ const libSaml = () => {
         // Default returning base64 encoded signature
         // Embed with node-rsa module
         const decryptedKey = new nrsa(
-          utility.readPrivateKey(keyString, passphrase),
+          decryptedKeyString, // Use the already-decrypted key
           undefined,
           {
             signingScheme: getSigningScheme(algorithm),

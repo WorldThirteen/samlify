@@ -64,7 +64,11 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
     const keyString = Buffer.isBuffer(entitySetting.privateKey) 
       ? entitySetting.privateKey.toString('utf8') 
       : entitySetting.privateKey;
-    const keyType = utility.detectKeyType(keyString);
+    
+    // Decrypt the key first if encrypted, then detect type
+    // readPrivateKey now handles encrypted PKCS#8 for both RSA and EC
+    const decryptedKeyString = utility.readPrivateKey(keyString, entitySetting.privateKeyPass);
+    const keyType = utility.detectKeyType(decryptedKeyString);
     
     // Use EC algorithm if key is EC, otherwise use the configured algorithm
     let signatureAlgorithm = entitySetting.requestSignatureAlgorithm;

@@ -8,6 +8,10 @@ import * as xmldsigjs from 'xmldsigjs';
 import * as x509 from '@peculiar/x509';
 import * as webcrypto from '@peculiar/webcrypto';
 import { inflate, deflate } from 'pako';
+import { AsnParser } from '@peculiar/asn1-schema';
+import { PrivateKeyInfo } from '@peculiar/asn1-pkcs8';
+import { id_rsaEncryption } from '@peculiar/asn1-rsa';
+import { id_ecPublicKey } from '@peculiar/asn1-ecc';
 
 const crypto = new webcrypto.Crypto();
 
@@ -191,7 +195,31 @@ function getPublicKeyPemFromCertificate(x509Certificate: string) {
 * If passphrase is used to protect the .pem content (recommend)
 */
 export function readPrivateKey(keyString: string | Buffer, passphrase: string | undefined, isOutputString?: boolean) {
-  return isString(passphrase) ? this.convertToString(pki.privateKeyToPem(pki.decryptRsaPrivateKey(String(keyString), passphrase)), isOutputString) : keyString;
+  if (!isString(passphrase)) {
+    return keyString;
+  }
+  
+  const keyStr = String(keyString);
+  
+  // For encrypted PKCS#8, use Node.js crypto which supports both RSA and EC
+  if (keyStr.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
+    // Node.js crypto can decrypt and re-export encrypted PKCS#8 keys
+    const nodeCrypto = require('crypto');
+    const keyObject = nodeCrypto.createPrivateKey({
+      key: keyStr,
+      format: 'pem',
+      passphrase: passphrase as string
+    });
+    // Export as unencrypted PKCS#8 PEM
+    const decryptedPem = keyObject.export({
+      type: 'pkcs8',
+      format: 'pem'
+    });
+    return this.convertToString(decryptedPem, isOutputString);
+  }
+  
+  // For legacy encrypted formats (e.g., BEGIN RSA PRIVATE KEY with encryption)
+  return this.convertToString(pki.privateKeyToPem(pki.decryptRsaPrivateKey(keyStr, passphrase as string)), isOutputString);
 }
 /**
 * @desc Inline syntax sugar
@@ -245,94 +273,142 @@ export function detectCertAlg(cert: string | undefined): 'RSA' | 'EC' | null {
 * @return {'RSA' | 'EC' | null} key type or null if unable to detect
 */
 /**
- * @desc Detect if a private key or certificate is RSA or EC
+ * @desc Detect if a private key or certificate is RSA or EC using robust ASN.1 parsing
  * @param keyOrCert {string | Buffer} PEM formatted key or certificate
- * @return {'RSA' | 'EC' | null} key type or null if unable to detect
+ * @return {'RSA' | 'EC'} key type
+ * @throws {Error} If key type cannot be reliably determined
  * 
- * This function uses multiple detection strategies:
- * 1. Checks PEM headers for explicit key type markers
- * 2. Parses DER-encoded ASN.1 structure to find OID markers
- * 3. For PKCS#8 keys, properly navigates the structure to find the algorithm identifier
+ * This function uses strict detection strategies without fallbacks:
+ * 1. Fast path: Checks PEM headers for explicit key type markers (SEC1, PKCS#1)
+ * 2. PKCS#8 path: Uses @peculiar/asn1-pkcs8 library to parse PrivateKeyInfo structure
+ * 3. Certificate path: Uses @peculiar/x509 to parse certificate and extract algorithm
+ * 
+ * For critical security operations, this function will throw an error rather than
+ * guess or assume a key type. This prevents silent failures and misconfigurations.
  */
-export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | 'EC' | null {
-  if (!keyOrCert) return null;
+export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | 'EC' {
+  if (!keyOrCert) {
+    throw new Error('Key or certificate is required for key type detection');
+  }
   
   // Convert Buffer to string if needed
   const keyString = Buffer.isBuffer(keyOrCert) ? keyOrCert.toString('utf8') : keyOrCert;
   
-  // Strategy 1: Check PEM headers for explicit type markers
-  // EC PRIVATE KEY = SEC1 format (RFC 5915)
-  // RSA PRIVATE KEY = PKCS#1 format (RFC 8017)
-  // PRIVATE KEY = PKCS#8 format (RFC 5208) - needs further inspection
+  // Strategy 1: Fast path - Check PEM headers for explicit type markers
+  // These formats include the key type in the header itself, so detection is certain
   if (keyString.includes('EC PRIVATE KEY') || keyString.includes('EC PUBLIC KEY')) {
-    return 'EC';
+    return 'EC'; // SEC1 format (RFC 5915)
   }
   if (keyString.includes('RSA PRIVATE KEY') || keyString.includes('RSA PUBLIC KEY')) {
-    return 'RSA';
+    return 'RSA'; // PKCS#1 format (RFC 8017)
   }
   
-  // Strategy 2: Parse DER structure for PKCS#8 keys or certificates
-  try {
-    // Remove PEM headers/footers and whitespace
-    const pemContent = keyString
-      .replace(/-----BEGIN [^-]+-----/, '')
-      .replace(/-----END [^-]+-----/, '')
-      .replace(/\s+/g, '');
-    
-    const der = Buffer.from(pemContent, 'base64');
-    
-    // PKCS#8 PrivateKeyInfo structure (RFC 5208):
-    // PrivateKeyInfo ::= SEQUENCE {
-    //   version         Version,
-    //   privateKeyAlgorithm PrivateKeyAlgorithmIdentifier,
-    //   privateKey      PrivateKey,
-    //   attributes      [0] IMPLICIT Attributes OPTIONAL }
-    //
-    // AlgorithmIdentifier ::= SEQUENCE {
-    //   algorithm       OBJECT IDENTIFIER,
-    //   parameters      ANY DEFINED BY algorithm OPTIONAL }
-    
-    // OID markers for different key types:
-    // RSA: 1.2.840.113549.1.1.1 (rsaEncryption)
-    const rsaOid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01]);
-    
-    // EC: 1.2.840.10045.2.1 (id-ecPublicKey)
-    const ecOid = Buffer.from([0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01]);
-    
-    // Additional RSA OIDs used in signatures
-    const rsaSha256Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B]); // sha256WithRSAEncryption
-    const rsaSha384Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0C]); // sha384WithRSAEncryption
-    const rsaSha512Oid = Buffer.from([0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0D]); // sha512WithRSAEncryption
-    
-    // Additional EC OIDs used in signatures
-    const ecdsaSha256Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02]); // ecdsa-with-SHA256
-    const ecdsaSha384Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03]); // ecdsa-with-SHA384
-    const ecdsaSha512Oid = Buffer.from([0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x04]); // ecdsa-with-SHA512
-    
-    // Check for EC OIDs first (more specific)
-    if (der.includes(ecOid) || der.includes(ecdsaSha256Oid) || 
-        der.includes(ecdsaSha384Oid) || der.includes(ecdsaSha512Oid)) {
-      return 'EC';
+  // Strategy 2: PKCS#8 format - Use proper ASN.1 parsing library
+  // This is the most common format for modern keys
+  if (keyString.includes('PRIVATE KEY') && !keyString.includes('ENCRYPTED')) {
+    try {
+      // Remove PEM headers/footers and whitespace
+      const pemContent = keyString
+        .replace(/-----BEGIN [^-]+-----/, '')
+        .replace(/-----END [^-]+-----/, '')
+        .replace(/\s+/g, '');
+      
+      const der = Buffer.from(pemContent, 'base64');
+      const privateKeyInfo = AsnParser.parse(der, PrivateKeyInfo);
+      const algorithm = privateKeyInfo.privateKeyAlgorithm.algorithm;
+      
+      // Check against standard OIDs
+      if (algorithm === id_ecPublicKey) {
+        return 'EC';
+      }
+      if (algorithm === id_rsaEncryption) {
+        return 'RSA';
+      }
+      
+      // Check OID prefixes for algorithm families
+      // EC family: 1.2.840.10045.* (ansi-x962)
+      // RSA family: 1.2.840.113549.1.1.* (pkcs-1)
+      if (algorithm.startsWith('1.2.840.10045')) {
+        return 'EC';
+      }
+      if (algorithm.startsWith('1.2.840.113549.1.1')) {
+        return 'RSA';
+      }
+      
+      // Unknown algorithm OID
+      throw new Error(
+        `Unsupported key algorithm OID: ${algorithm}. ` +
+        `Expected RSA (1.2.840.113549.1.1.*) or EC (1.2.840.10045.*)`
+      );
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('Unsupported key algorithm')) {
+        throw e; // Re-throw our custom errors
+      }
+      throw new Error(
+        `Failed to parse PKCS#8 private key: ${e instanceof Error ? e.message : String(e)}. ` +
+        `Ensure the key is valid PEM-encoded PKCS#8 format.`
+      );
     }
-    
-    // Check for RSA OIDs
-    if (der.includes(rsaOid) || der.includes(rsaSha256Oid) || 
-        der.includes(rsaSha384Oid) || der.includes(rsaSha512Oid)) {
-      return 'RSA';
+  }
+  
+  // Strategy 3: X.509 Certificate - Use existing @peculiar/x509 dependency
+  if (keyString.includes('CERTIFICATE')) {
+    try {
+      // Remove PEM headers/footers and whitespace
+      const pemContent = keyString
+        .replace(/-----BEGIN [^-]+-----/, '')
+        .replace(/-----END [^-]+-----/, '')
+        .replace(/\s+/g, '');
+      
+      const der = Buffer.from(pemContent, 'base64');
+      // Convert Buffer to Uint8Array for x509 library
+      const uint8Array = new Uint8Array(der);
+      const cert = new x509.X509Certificate(uint8Array);
+      const algorithm = cert.publicKey.algorithm.name;
+      
+      // Check for EC algorithms
+      if (algorithm === 'ECDSA' || algorithm === 'ECDH') {
+        return 'EC';
+      }
+      
+      // Check for RSA algorithms
+      if (algorithm === 'RSA' || algorithm === 'RSASSA-PKCS1-v1_5' || 
+          algorithm === 'RSA-PSS' || algorithm === 'RSA-OAEP') {
+        return 'RSA';
+      }
+      
+      // Unknown algorithm
+      throw new Error(
+        `Unsupported certificate algorithm: ${algorithm}. ` +
+        `Expected RSA or EC-based algorithm.`
+      );
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('Unsupported certificate algorithm')) {
+        throw e; // Re-throw our custom errors
+      }
+      throw new Error(
+        `Failed to parse X.509 certificate: ${e instanceof Error ? e.message : String(e)}. ` +
+        `Ensure the certificate is valid PEM-encoded X.509 format.`
+      );
     }
-    
-  } catch (e) {
-    // If DER parsing fails, try one more fallback
   }
   
-  // Strategy 3: Default fallback - assume RSA for generic PRIVATE KEY headers
-  // This is reasonable since RSA is more common and was the default before EC support
-  if (keyString.includes('PRIVATE KEY') || keyString.includes('PUBLIC KEY')) {
-    return 'RSA';
+  // Encrypted PKCS#8 - Cannot reliably detect without decrypting
+  // The encryption wrapper hides the algorithm identifier
+  if (keyString.includes('ENCRYPTED PRIVATE KEY')) {
+    throw new Error(
+      'Encrypted PKCS#8 private keys cannot be inspected without decryption. ' +
+      'The key algorithm is encrypted within the PKCS#8 structure. ' +
+      'Please decrypt the key first or use key type detection after decryption.'
+    );
   }
   
-  // Unable to determine key type
-  return null;
+  // Unknown key format
+  throw new Error(
+    'Unable to detect key type: unrecognized key format. ' +
+    'Supported formats: SEC1 (EC PRIVATE KEY), PKCS#1 (RSA PRIVATE KEY), ' +
+    'PKCS#8 (PRIVATE KEY), X.509 (CERTIFICATE)'
+  );
 }
 
 const utility = {
