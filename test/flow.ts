@@ -320,6 +320,45 @@ test('create login request with redirect binding signing with encrypted EC PKCS#
   t.true(valid, 'signature did not validate');
 });
 
+test('create login request with post binding signing with EC key', async t => {
+  // Create SP with EC keys
+  const _sp = serviceProvider({
+    authnRequestsSigned: true,
+    signingCert: readFileSync('./test/key/sp/eccert.encrypted.pkcs8.cer'),
+    privateKey: readFileSync('./test/key/sp/ecprivkey.encrypted.pkcs8.pem'),
+    privateKeyPass: 'VHOSp5RUiBcrsjrcAuXFwU1NKCkGA8px',
+    // Use a minimal metadata or let it generate from settings
+    entityID: 'https://sp-ec.example.org/metadata',
+    assertionConsumerService: [{
+      Binding: binding.post,
+      Location: 'https://sp-ec.example.org/acs',
+    }],
+  });
+
+  const { context: SAMLRequest, id, entityEndpoint, type } = _sp.createLoginRequest(idp, 'post') as PostBindingContext;
+  
+  // Verify the context is a valid base64-encoded string
+  t.is(typeof SAMLRequest, 'string', 'context should be a string');
+  t.is(typeof id, 'string', 'id should be a string');
+  t.is(type, 'SAMLRequest', 'type should be SAMLRequest');
+  
+  // Decode and parse the XML to verify it has a signature with ECDSA
+  const decodedXML = utility.base64Decode(SAMLRequest).toString();
+  t.true(decodedXML.includes('<ds:Signature'), 'XML should contain signature element');
+  
+  // Check for ECDSA algorithm URI
+  const hasECDSA = decodedXML.toLowerCase().includes('ecdsa') || 
+                   decodedXML.includes('xmldsig-more#ecdsa');
+  t.true(hasECDSA, 'signature should use ECDSA algorithm');
+  
+  // Verify the signature by having the IDP parse and validate it
+  // The IDP will verify the signature using the certificate embedded in the XML
+  const { extract } = await idp.parseLoginRequest(_sp, 'post', { body: { SAMLRequest }});
+  t.is(extract.issuer, 'https://sp-ec.example.org/metadata', 'issuer should match SP');
+  t.is(typeof extract.request.id, 'string', 'request id should be a string');
+  t.is(typeof extract.signature, 'string', 'signature should be present and valid');
+});
+
 test('create login request with post binding using [custom template]', t => {
   const _sp = serviceProvider({
     ...defaultSpConfig, loginRequestTemplate: {

@@ -178,14 +178,33 @@ function applyDefault(obj1, obj2) {
 }
 /**
 * @desc Get public key in pem format from the certificate included in the metadata
-* @param {string} x509 certificate
+* @param {string} x509 certificate (base64 string without headers)
 * @return {string} public key fetched from the certificate
 */
 function getPublicKeyPemFromCertificate(x509Certificate: string) {
-  const certDerBytes = util.decode64(x509Certificate);
-  const obj = asn1.fromDer(certDerBytes);
-  const cert = pki.certificateFromAsn1(obj);
-  return pki.publicKeyToPem(cert.publicKey);
+  // Try using @peculiar/x509 first which supports both RSA and EC
+  try {
+    // Wrap the certificate in PEM format
+    const pem = `-----BEGIN CERTIFICATE-----\n${x509Certificate.match(/.{1,64}/g)?.join('\n')}\n-----END CERTIFICATE-----`;
+    const cert = new x509.X509Certificate(pem);
+    
+    // Export public key in PEM format
+    const publicKeyDer = cert.publicKey.rawData;
+    const publicKeyBase64 = Buffer.from(publicKeyDer).toString('base64');
+    const publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicKeyBase64.match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----`;
+    
+    return publicKeyPem;
+  } catch (e) {
+    // Fallback to node-forge for RSA certificates (legacy support)
+    try {
+      const certDerBytes = util.decode64(x509Certificate);
+      const obj = asn1.fromDer(certDerBytes);
+      const cert = pki.certificateFromAsn1(obj);
+      return pki.publicKeyToPem(cert.publicKey);
+    } catch (forgeError) {
+      throw new Error(`Failed to extract public key from certificate: ${(e as Error).message}`);
+    }
+  }
 }
 /**
 * @desc Read private key from pem-formatted string

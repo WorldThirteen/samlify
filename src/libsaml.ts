@@ -320,26 +320,71 @@ const libSaml = () => {
     * @param  {string[]} transformationAlgorithms   canonicalization and transformation Algorithms
     * @return {string} base64 encoded string
     */
+    /**
+    * @desc Register ECDSA signature algorithms with xml-crypto
+    * @param sig SignedXml instance to register algorithms on
+    */
+    registerECDSAAlgorithms(sig: SignedXml) {
+      // Helper to create ECDSA algorithm class for a specific hash
+      const createECDSAAlgorithm = (hashAlgorithm: string) => {
+        return class ECDSASignatureAlgorithm {
+          getSignature(signedInfo: string, privateKey: string | Buffer): string {
+            const sign = nodeCrypto.createSign(hashAlgorithm);
+            sign.update(signedInfo);
+            const signature = sign.sign({
+              key: privateKey.toString(),
+              format: 'pem',
+              type: 'pkcs8'
+            });
+            return signature.toString('base64');
+          }
+          
+          verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
+            const verify = nodeCrypto.createVerify(hashAlgorithm);
+            verify.update(str);
+            return verify.verify(key.toString(), signatureValue, 'base64');
+          }
+          
+          getAlgorithmName(): string {
+            return hashAlgorithm;
+          }
+        };
+      };
+      
+      // Register all ECDSA variants
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1'] = createECDSAAlgorithm('SHA1') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256'] = createECDSAAlgorithm('SHA256') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384'] = createECDSAAlgorithm('SHA384') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512'] = createECDSAAlgorithm('SHA512') as any;
+    },
+    
     constructSAMLSignature(opts: SignatureConstructor) {
-      // Detect key type
-      let keyType: 'RSA' | 'EC';
-      try {
-        keyType = utility.detectKeyType(opts.privateKey);
-      } catch (e) {
-        // For encrypted keys, default to RSA (most common)
-        const keyString = Buffer.isBuffer(opts.privateKey) 
-          ? opts.privateKey.toString('utf8') 
-          : opts.privateKey;
-        if (keyString.includes('ENCRYPTED PRIVATE KEY') && opts.privateKeyPass) {
-          keyType = 'RSA'; // Default assumption for encrypted keys
+      // Decrypt key first if encrypted, then detect type
+      const keyString = Buffer.isBuffer(opts.privateKey) 
+        ? opts.privateKey.toString('utf8') 
+        : opts.privateKey;
+      const decryptedKeyString = utility.readPrivateKey(keyString, opts.privateKeyPass);
+      const keyType = utility.detectKeyType(decryptedKeyString);
+      
+      // Auto-detect signature algorithm based on key type if not explicitly RSA or ECDSA
+      let signatureAlgorithm = opts.signatureAlgorithm;
+      if (signatureAlgorithm && keyType === 'EC' && signatureAlgorithm.includes('rsa')) {
+        // If algorithm is RSA but key is EC, convert to equivalent ECDSA algorithm
+        if (signatureAlgorithm.includes('sha512')) {
+          signatureAlgorithm = signatureAlgorithms.ECDSA_SHA512;
+        } else if (signatureAlgorithm.includes('sha384')) {
+          signatureAlgorithms.ECDSA_SHA384;
         } else {
-          throw e; // Re-throw if it's a different error
+          signatureAlgorithm = signatureAlgorithms.ECDSA_SHA256;
         }
       }
       
       if (keyType === 'EC') {
-        // Use xmldsigjs for EC XML signatures
-        return this.constructECXMLSignature(opts);
+        // Use xml-crypto with custom EC signer
+        return this.constructECXMLSignature({
+          ...opts,
+          signatureAlgorithm: signatureAlgorithm || signatureAlgorithms.ECDSA_SHA256
+        });
       } else {
         // Use xml-crypto for RSA signatures
         return this.constructRSAXMLSignature(opts);
@@ -397,12 +442,100 @@ const libSaml = () => {
       return isBase64Output !== false ? utility.base64Encode(sig.getSignedXml()) : sig.getSignedXml();
     },
     /**
-    * @desc Construct EC XML signature using xmldsigjs
+    * @desc Construct EC XML signature using xml-crypto with custom signer
+    * Note: xml-crypto doesn't natively support ECDSA, so we register a custom signature algorithm
     */
     constructECXMLSignature(opts: SignatureConstructor) {
-      // TODO: Implement EC XML signature support
-      // For now, throw an error indicating EC XML signatures are not yet implemented
-      throw new Error('EC XML signature construction is not yet implemented. Please use RSA keys for XML signatures or use message signatures with EC keys.');
+      const {
+        rawSamlMessage,
+        referenceTagXPath,
+        privateKey,
+        privateKeyPass,
+        signatureAlgorithm = signatureAlgorithms.ECDSA_SHA256,
+        transformationAlgorithms = [
+          'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+          'http://www.w3.org/2001/10/xml-exc-c14n#',
+        ],
+        signingCert,
+        signatureConfig,
+        isBase64Output = true,
+        isMessageSigned = false,
+      } = opts;
+
+      // Decrypt the key if encrypted
+      const decryptedKey = utility.readPrivateKey(privateKey, privateKeyPass, true) as string;
+      
+      // Determine hash algorithm from signature algorithm
+      let hashAlgorithm = 'SHA256';
+      if (signatureAlgorithm.includes('sha512')) {
+        hashAlgorithm = 'SHA512';
+      } else if (signatureAlgorithm.includes('sha384')) {
+        hashAlgorithm = 'SHA384';
+      } else if (signatureAlgorithm.includes('sha1')) {
+        hashAlgorithm = 'SHA1';
+      }
+      
+      // Create a custom ECDSA signature algorithm class for xml-crypto
+      class ECDSASignatureAlgorithm {
+        getSignature(signedInfo: string, privateKey: string | Buffer): string {
+          const sign = nodeCrypto.createSign(hashAlgorithm);
+          sign.update(signedInfo);
+          const signature = sign.sign({
+            key: privateKey.toString(),
+            format: 'pem',
+            type: 'pkcs8'
+          });
+          return signature.toString('base64');
+        }
+        
+        verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
+          const verify = nodeCrypto.createVerify(hashAlgorithm);
+          verify.update(str);
+          return verify.verify(key.toString(), signatureValue, 'base64');
+        }
+        
+        getAlgorithmName(): string {
+          return signatureAlgorithm;
+        }
+      }
+      
+      // Create a custom SignedXml instance with ECDSA support
+      const sig = new SignedXml();
+      
+      // Register the custom ECDSA algorithm
+      sig.SignatureAlgorithms[signatureAlgorithm] = ECDSASignatureAlgorithm as any;
+      
+      // Add assertion sections as reference
+      const digestAlgorithm = getDigestMethod(signatureAlgorithm);
+      if (referenceTagXPath) {
+        sig.addReference({
+          xpath: referenceTagXPath,
+          transforms: transformationAlgorithms,
+          digestAlgorithm: digestAlgorithm
+        });
+      }
+      if (isMessageSigned) {
+        sig.addReference({
+          // reference to the root node
+          xpath: '/*',
+          transforms: transformationAlgorithms,
+          digestAlgorithm
+        });
+      }
+      
+      sig.signatureAlgorithm = signatureAlgorithm;
+      sig.publicCert = this.getKeyInfo(signingCert, signatureConfig).getKey();
+      sig.getKeyInfoContent = this.getKeyInfo(signingCert, signatureConfig).getKeyInfo;
+      sig.privateKey = decryptedKey;
+      sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+      
+      if (signatureConfig) {
+        sig.computeSignature(rawSamlMessage, signatureConfig);
+      } else {
+        sig.computeSignature(rawSamlMessage);
+      }
+      
+      return isBase64Output !== false ? utility.base64Encode(sig.getSignedXml()) : sig.getSignedXml();
     },
     /**
     * @desc Verify the XML signature
@@ -450,6 +583,10 @@ const libSaml = () => {
         let verified = false;
 
         sig.signatureAlgorithm = opts.signatureAlgorithm!;
+        
+        // Register ECDSA algorithms if needed for verification
+        // This ensures xml-crypto can verify ECDSA signatures
+        this.registerECDSAAlgorithms(sig);
 
         if (!opts.keyFile && !opts.metadata) {
           throw new Error('ERR_UNDEFINED_SIGNATURE_VERIFIER_OPTIONS');
