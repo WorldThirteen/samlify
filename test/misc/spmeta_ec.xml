@@ -1,0 +1,29 @@
+<EntityDescriptor
+ xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+ xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+ xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+ entityID="https://sp.example.org/metadata">
+    <SPSSODescriptor AuthnRequestsSigned="true" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+        <KeyDescriptor use="signing">
+            <KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+                <X509Data>
+                    <X509Certificate>MIICBDCCAaugAwIBAgIUa+ra1iGVlO7Tc/3wUmm+99Qh7iwwCgYIKoZIzj0EAwIwWDELMAkGA1UEBhMCVVMxDjAMBgNVBAgMBVN0YXRlMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xEzARBgNVBAMMClNQIEVDIENlcnQwHhcNMjUxMDE0MTQ1MTQ4WhcNMjYxMDE0MTQ1MTQ4WjBYMQswCQYDVQQGEwJVUzEOMAwGA1UECAwFU3RhdGUxDTALBgNVBAcMBENpdHkxFTATBgNVBAoMDE9yZ2FuaXphdGlvbjETMBEGA1UEAwwKU1AgRUMgQ2VydDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABGWVRn9LAmBGXnFrO2POMr4hgLucf1luJ/NkzHKLpki7qenHqXS+yEa4wbsCzeC2oTSRn0yIeqNT1++DiOdLMUqjUzBRMB0GA1UdDgQWBBSaYJgTcudK2Z/0QbFSZMWGkZdxrDAfBgNVHSMEGDAWgBSaYJgTcudK2Z/0QbFSZMWGkZdxrDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIF7VczqK27OoJLZUm5piTRlT7TwJVhwZz62FnEPd/RtqAiBiIfBnLBTG4CFACELMTlV8h+wmmGCMApKX3jpEEWYhkA==</X509Certificate>
+                </X509Data>
+            </KeyInfo>
+        </KeyDescriptor>
+        <KeyDescriptor use="encryption">
+            <KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+                <X509Data>
+                    <X509Certificate>MIICBDCCAaugAwIBAgIUa+ra1iGVlO7Tc/3wUmm+99Qh7iwwCgYIKoZIzj0EAwIwWDELMAkGA1UEBhMCVVMxDjAMBgNVBAgMBVN0YXRlMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xEzARBgNVBAMMClNQIEVDIENlcnQwHhcNMjUxMDE0MTQ1MTQ4WhcNMjYxMDE0MTQ1MTQ4WjBYMQswCQYDVQQGEwJVUzEOMAwGA1UECAwFU3RhdGUxDTALBgNVBAcMBENpdHkxFTATBgNVBAoMDE9yZ2FuaXphdGlvbjETMBEGA1UEAwwKU1AgRUMgQ2VydDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABGWVRn9LAmBGXnFrO2POMr4hgLucf1luJ/NkzHKLpki7qenHqXS+yEa4wbsCzeC2oTSRn0yIeqNT1++DiOdLMUqjUzBRMB0GA1UdDgQWBBSaYJgTcudK2Z/0QbFSZMWGkZdxrDAfBgNVHSMEGDAWgBSaYJgTcudK2Z/0QbFSZMWGkZdxrDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIF7VczqK27OoJLZUm5piTRlT7TwJVhwZz62FnEPd/RtqAiBiIfBnLBTG4CFACELMTlV8h+wmmGCMApKX3jpEEWYhkA==</X509Certificate>
+                </X509Data>
+            </KeyInfo>
+        </KeyDescriptor>
+        <NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</NameIDFormat>
+        <SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://sp.example.org/sp/slo" />
+        <SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://sp.example.org/sp/slo" />
+        <AssertionConsumerService isDefault="true" index="0" Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://sp.example.org/sp/sso"/>
+        <AssertionConsumerService index="1" Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact" Location="https://sp.example.org/sp/sso"/>
+        <AssertionConsumerService index="2" Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://sp.example.org/sp/sso"/>
+        <AssertionConsumerService index="3" Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST-SimpleSign" Location="https://sp.example.org/sp/sso"/>
+    </SPSSODescriptor>
+</EntityDescriptor>

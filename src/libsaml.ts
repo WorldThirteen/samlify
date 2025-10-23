@@ -342,7 +342,23 @@ const libSaml = () => {
           verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
             const verify = nodeCrypto.createVerify(hashAlgorithm);
             verify.update(str);
-            return verify.verify(key.toString(), signatureValue, 'base64');
+            
+            // Handle both PEM and DER format certificates
+            let certKey: string | Buffer = key;
+            if (Buffer.isBuffer(key)) {
+              // Check if it's DER format (binary) - try to convert to PEM
+              const keyString = key.toString('utf8');
+              if (!keyString.includes('-----BEGIN')) {
+                // It's likely DER format - convert to PEM
+                const base64Cert = key.toString('base64');
+                const pemCert = '-----BEGIN CERTIFICATE-----\n' + 
+                  base64Cert.match(/.{1,64}/g)?.join('\n') + 
+                  '\n-----END CERTIFICATE-----\n';
+                certKey = pemCert;
+              }
+            }
+            
+            return verify.verify(certKey, signatureValue, 'base64');
           }
           
           getAlgorithmName(): string {

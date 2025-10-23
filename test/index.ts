@@ -134,6 +134,11 @@ test('getAssertionConsumerService with two bindings', t => {
   const _decodedRequestSHA512: string = String(readFileSync('./test/misc/signed_request_sha512.xml'));
   const _falseDecodedRequestSHA512: string = String(readFileSync('./test/misc/false_signed_request_sha512.xml'));
 
+  // ECDSA-signed request files
+  const _decodedRequestEcdsaSHA1: string = String(readFileSync('./test/misc/signed_request_ecdsa_sha1.xml'));
+  const _decodedRequestEcdsaSHA256: string = String(readFileSync('./test/misc/signed_request_ecdsa_sha256.xml'));
+  const _decodedRequestEcdsaSHA512: string = String(readFileSync('./test/misc/signed_request_ecdsa_sha512.xml'));
+
   const octetString: string = 'SAMLRequest=fVNdj9MwEHxH4j9Yfm%2Fi5PpBrLaotEJUOrioKTzwgoy9oZZiO9ibu%2FLvcXLtKUhHnyzZM7Mzu+tlEKZp+abDkz3A7w4CkrNpbODDw4p23nIngg7cCgOBo+TV5vM9zxPGW+%2FQSdfQEeU2Q4QAHrWzlOx3K%2FrjHSsWbFEzdsfETDE2z5ksVKHqYlHP84WooVBS5lNKvoEPkbeiUYaS0rtHrcB%2FiRVWtCoJRuNRM4QO9jagsBiRLJtO2GKSzY%2F5HZ%2FlfDr7TskuIrUVOIidEFueplq1CZyFaRtIpDNpVT1U4B+1hKQ9tUO5IegHbZW2v25n%2FPkMCvzT8VhOyofqSMnmmnvrbOgM+Iv818P9i4nwrwcFxmVp1IJzb+K9kIGu374hZNm3mQ9R%2Ffp1rgEUSqBYpmPsC7nlfd%2F2u9I1Wv4hH503Av8fKkuy4UarST1AORihm41SHkKI4ZrGPW09CIyzQN8BTce1LmsFaliy2ACEM5KtM63wOvRTiNYlPoe7xhtjt01cmwPU65ubJbnscfG6jMeT8+qS%2FlWpwV96w2BEXN%2FHn2P9Fw%3D%3D&SigAlg=http%3A%2F%2Fwww.w3.org%2F2000%2F09%2Fxmldsig%23rsa-sha1';
   const octetStringSHA256: string = 'SAMLRequest=fZJbTwIxEIX%2Fyqbvy3Yv3BogQYiRBJWw6INvY3eAJt0WO10v%2F966YIKJkPRpek7nfDMdEdT6IKaN35s1vjVIPvqstSHRXoxZ44ywQIqEgRpJeCnK6f1SZB0uDs56K61mZ5brDiBC55U1LFrMx2wrB8P%2BIB%2FGeQHbuOgVwxigB3EqewXfDjDPZJ9Fz%2BgoWMYsvBB8RA0uDHkwPpR42o1THvNswzMRTtHtpEX2wqJ5QFEGfOvce38QSaKtBL235EXOeZoQ2aRUZqexVDvzaEp070pikveG3W5otTrx3ShTBdl1tNejiMTdZrOKV4%2FlhkXTX9yZNdTU6E4dntbLfzIVnGdtJpDEJqOfaYqW1k0ua2v0UIGHUXKuHx3X%2BhBSLuYrq5X8im6tq8Ffhkg7aVtRVbxtpQJrUHpaVQ6JAozW9mPmEDyGzYEmZMnk2PbvB5p8Aw%3D%3D&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha256';
   const octetStringSHA512: string = 'SAMLRequest=fZJfT8IwFMW%2FytL3sY5tCA0jQYiRBIUw9MG3a3cnTboWezv%2FfHvr0AQT9fX2nJ7zu%2B2UoNVHMe%2F8wezwuUPy0VurDYn%2BoGSdM8ICKRIGWiThpajmN2sxHHBxdNZbaTU7s%2FzvACJ0XlnDotWyZFBkDcAE47wZjeNcXqTxGAsZy0lR1EUzAiwaFt2jo2ApWbgh%2BIg6XBnyYHwY8bSIUx7z4Z4PRZaLbDLg4%2FyBRcuAogz43nnw%2FiiSRFsJ%2BmDJi4zzNCGySaXMk8ZKPZmNqdC9KIlJNgr5IWr7xXepTB1k%2F6M9nkQkrvf7bbzdVHsWzb9xF9ZQ16L7SrjbrX%2FplHM%2B7DuBJDabfm5T9LRu9re2RQ81eJgm5%2Frp6VlvQ8vVcmu1ku%2FRlXUt%2BL8h0kHaT1QdN71UYAtKz%2BvaIVGA0dq%2BLhyCx5I1oAlZMjvF%2FvxAsw8%3D&SigAlg=http%3A%2F%2Fwww.w3.org%2F2001%2F04%2Fxmldsig-more%23rsa-sha512';
@@ -247,6 +252,26 @@ test('getAssertionConsumerService with two bindings', t => {
   test('verify stringified SAML message signed with ECDSA-SHA512', async t => {
     const signature = libsaml.constructMessageSignature(octetStringSHA512, _spEcPrivPem, _spEcPrivKeyPass, true, signatureAlgorithms.ECDSA_SHA512);
     t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetStringSHA512, Buffer.from(signature.toString(), 'base64'), signatureAlgorithms.ECDSA_SHA512), true);
+  });
+
+  // ECDSA XML signature verification tests
+  test('verify a XML signature signed by ECDSA-SHA1 with metadata', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA1, { metadata: SPEcMetadata, signatureAlgorithm: signatureAlgorithms.ECDSA_SHA1 })[0], true);
+  });
+  test('verify a XML signature signed by ECDSA-SHA256 with metadata', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA256, { metadata: SPEcMetadata, signatureAlgorithm: signatureAlgorithms.ECDSA_SHA256 })[0], true);
+  });
+  test('verify a XML signature signed by ECDSA-SHA512 with metadata', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA512, { metadata: SPEcMetadata, signatureAlgorithm: signatureAlgorithms.ECDSA_SHA512 })[0], true);
+  });
+  test('verify a XML signature signed by ECDSA-SHA1 with .cer keyFile', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA1, { keyFile: './test/key/sp/eccert.cer', signatureAlgorithm: signatureAlgorithms.ECDSA_SHA1 })[0], true);
+  });
+  test('verify a XML signature signed by ECDSA-SHA256 with .cer keyFile', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA256, { keyFile: './test/key/sp/eccert.cer', signatureAlgorithm: signatureAlgorithms.ECDSA_SHA256 })[0], true);
+  });
+  test('verify a XML signature signed by ECDSA-SHA512 with .cer keyFile', t => {
+    t.is(libsaml.verifySignature(_decodedRequestEcdsaSHA512, { keyFile: './test/key/sp/eccert.cer', signatureAlgorithm: signatureAlgorithms.ECDSA_SHA512 })[0], true);
   });
 
   test('integrity check for request signed with RSA-SHA1', t => {
