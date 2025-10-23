@@ -21,6 +21,8 @@ const signatureAlgorithms = algorithms.signature;
 const _spKeyFolder = './test/key/sp/';
 const _spPrivPem = String(readFileSync(_spKeyFolder + 'privkey.pem'));
 const _spPrivKeyPass = 'VHOSp5RUiBcrsjrcAuXFwU1NKCkGA8px';
+const _spEcPrivPem = String(readFileSync(_spKeyFolder + 'ecprivkey.pem'));
+const _spEcPrivKeyPass = undefined; // Unencrypted key
 
 const defaultIdpConfig = {
   privateKey: readFileSync('./test/key/idp/privkey.pem'),
@@ -49,6 +51,7 @@ const sp = serviceProvider(defaultSpConfig);
 
 const IdPMetadata = idpMetadata(readFileSync('./test/misc/idpmeta.xml'));
 const SPMetadata = spMetadata(readFileSync('./test/misc/spmeta.xml'));
+const SPEcMetadata = spMetadata(readFileSync('./test/misc/spmeta_ec.xml'));
 const sampleSignedResponse = readFileSync('./test/misc/response_signed.xml').toString();
 const wrongResponse = readFileSync('./test/misc/invalid_response.xml').toString();
 const spCertKnownGood = readFileSync('./test/key/sp/knownGoodCert.cer').toString().trim();
@@ -207,6 +210,45 @@ test('getAssertionConsumerService with two bindings', t => {
   test('verify a XML signature signed by RSA-SHA1 with metadata', t => {
     t.is(libsaml.verifySignature(_decodedResponse, { metadata: IdPMetadata })[0], true);
   });
+
+  // ECDSA signature tests
+  test('sign a SAML message with ECDSA-SHA1', t => {
+    const signature = libsaml.constructMessageSignature(octetString, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA1);
+    t.is(typeof signature.toString('base64'), 'string');
+  });
+  test('sign a SAML message with ECDSA-SHA256', t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA256, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA256);
+    t.is(typeof signature.toString('base64'), 'string');
+  });
+  test('sign a SAML message with ECDSA-SHA512', t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA512, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA512);
+    t.is(typeof signature.toString('base64'), 'string');
+  });
+  test('verify binary SAML message signed with ECDSA-SHA1', async t => {
+    const signature = libsaml.constructMessageSignature(octetString, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA1);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetString, signature, signatureAlgorithms.ECDSA_SHA1), true);
+  });
+  test('verify binary SAML message signed with ECDSA-SHA256', async t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA256, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA256);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetStringSHA256, signature, signatureAlgorithms.ECDSA_SHA256), true);
+  });
+  test('verify binary SAML message signed with ECDSA-SHA512', async t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA512, _spEcPrivPem, _spEcPrivKeyPass, false, signatureAlgorithms.ECDSA_SHA512);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetStringSHA512, signature, signatureAlgorithms.ECDSA_SHA512), true);
+  });
+  test('verify stringified SAML message signed with ECDSA-SHA1', async t => {
+    const signature = libsaml.constructMessageSignature(octetString, _spEcPrivPem, _spEcPrivKeyPass, true, signatureAlgorithms.ECDSA_SHA1);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetString, Buffer.from(signature.toString(), 'base64'), signatureAlgorithms.ECDSA_SHA1), true);
+  });
+  test('verify stringified SAML message signed with ECDSA-SHA256', async t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA256, _spEcPrivPem, _spEcPrivKeyPass, true, signatureAlgorithms.ECDSA_SHA256);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetStringSHA256, Buffer.from(signature.toString(), 'base64'), signatureAlgorithms.ECDSA_SHA256), true);
+  });
+  test('verify stringified SAML message signed with ECDSA-SHA512', async t => {
+    const signature = libsaml.constructMessageSignature(octetStringSHA512, _spEcPrivPem, _spEcPrivKeyPass, true, signatureAlgorithms.ECDSA_SHA512);
+    t.is(await libsaml.verifyMessageSignature(SPEcMetadata, octetStringSHA512, Buffer.from(signature.toString(), 'base64'), signatureAlgorithms.ECDSA_SHA512), true);
+  });
+
   test('integrity check for request signed with RSA-SHA1', t => {
     const [verified, verifiedData] = libsaml.verifySignature(_falseDecodedRequestSHA1, { metadata: SPMetadata, signatureAlgorithm: signatureAlgorithms.RSA_SHA1 });
     t.is(verified, false);
