@@ -107,7 +107,7 @@ export interface LibSamlInterface {
   createKeySection: (use: KeyUse, cert: string | Buffer) => {};
   constructMessageSignature: (octetString: string, key: string | Buffer, passphrase?: string, isBase64?: boolean, signingAlgorithm?: string) => string;
 
-  verifyMessageSignature: (metadata, octetString: string, signature: string | Buffer, verifyAlgorithm?: string) => boolean;
+  verifyMessageSignature: (metadata, octetString: string, signature: string | Buffer, verifyAlgorithm?: string) => Promise<boolean>;
   getKeyInfo: (x509Certificate: string, signatureConfig?: any) => void;
   encryptAssertion: (sourceEntity, targetEntity, entireXML: string) => Promise<string>;
   decryptAssertion: (here, entireXML: string) => Promise<[string, any]>;
@@ -366,18 +366,11 @@ const libSaml = () => {
       const decryptedKeyString = utility.readPrivateKey(keyString, opts.privateKeyPass);
       const keyType = utility.detectKeyType(decryptedKeyString);
       
-      // Auto-detect signature algorithm based on key type if not explicitly RSA or ECDSA
-      let signatureAlgorithm = opts.signatureAlgorithm;
-      if (signatureAlgorithm && keyType === 'EC' && signatureAlgorithm.includes('rsa')) {
-        // If algorithm is RSA but key is EC, convert to equivalent ECDSA algorithm
-        if (signatureAlgorithm.includes('sha512')) {
-          signatureAlgorithm = signatureAlgorithms.ECDSA_SHA512;
-        } else if (signatureAlgorithm.includes('sha384')) {
-          signatureAlgorithms.ECDSA_SHA384;
-        } else {
-          signatureAlgorithm = signatureAlgorithms.ECDSA_SHA256;
-        }
-      }
+      // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+      const signatureAlgorithm = utility.normalizeSignatureAlgorithm(
+        opts.signatureAlgorithm,
+        keyType
+      );
       
       if (keyType === 'EC') {
         // Use xml-crypto with custom EC signer
@@ -778,33 +771,27 @@ const libSaml = () => {
       const decryptedKeyString = utility.readPrivateKey(keyString, passphrase);
       const keyType = utility.detectKeyType(decryptedKeyString);
       
-      // If no algorithm specified, use default based on key type
-      let algorithm = signingAlgorithm;
-      if (!algorithm) {
-        algorithm = keyType === 'EC' ? signatureAlgorithms.ECDSA_SHA256 : signatureAlgorithms.RSA_SHA256;
-      } else if (keyType === 'EC' && algorithm.includes('rsa')) {
-        // If algorithm is RSA but key is EC, convert to equivalent ECDSA algorithm
-        if (algorithm.includes('sha512')) {
-          algorithm = signatureAlgorithms.ECDSA_SHA512;
-        } else if (algorithm.includes('sha384')) {
-          algorithm = signatureAlgorithms.ECDSA_SHA384;
-        } else {
-          algorithm = signatureAlgorithms.ECDSA_SHA256;
-        }
+      // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+      // For EC keys, default to SHA256 if not specified
+      let algorithm = utility.normalizeSignatureAlgorithm(signingAlgorithm, keyType);
+      if (!algorithm && keyType === 'EC') {
+        algorithm = signatureAlgorithms.ECDSA_SHA256;
       }
+      // Note: For RSA, algorithm can be undefined - getSigningScheme will default to SHA-1 (backward compatible)
       
       if (keyType === 'EC') {
         // Use Node's crypto module for EC signing (synchronous)
         // Use the decrypted key from readPrivateKey
         const pemKey = decryptedKeyString;
         
-        // Determine hash algorithm from signing algorithm
+        // Determine hash algorithm from signing algorithm (algorithm is guaranteed to be set for EC)
+        const effectiveAlgorithm = algorithm!; // Non-null assertion: we set default above for EC keys
         let hashAlgorithm = 'SHA256';
-        if (algorithm.includes('sha384')) {
+        if (effectiveAlgorithm.includes('sha384')) {
           hashAlgorithm = 'SHA384';
-        } else if (algorithm.includes('sha512')) {
+        } else if (effectiveAlgorithm.includes('sha512')) {
           hashAlgorithm = 'SHA512';
-        } else if (algorithm.includes('sha1')) {
+        } else if (effectiveAlgorithm.includes('sha1')) {
           hashAlgorithm = 'SHA1';
         }
         
@@ -819,9 +806,8 @@ const libSaml = () => {
         
         return isBase64 !== false ? signature.toString('base64') : signature;
       } else {
-        // Default RSA signing
+        // RSA signing using node-rsa
         // Default returning base64 encoded signature
-        // Embed with node-rsa module
         const decryptedKey = new nrsa(
           decryptedKeyString, // Use the already-decrypted key
           undefined,

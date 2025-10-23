@@ -12,6 +12,7 @@ import { AsnParser } from '@peculiar/asn1-schema';
 import { PrivateKeyInfo } from '@peculiar/asn1-pkcs8';
 import { id_rsaEncryption } from '@peculiar/asn1-rsa';
 import { id_ecPublicKey } from '@peculiar/asn1-ecc';
+import { algorithms } from './urn';
 
 const crypto = new webcrypto.Crypto();
 
@@ -430,6 +431,49 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
   );
 }
 
+/**
+ * @desc Normalize signature algorithm based on key type
+ * @param algorithm {string | undefined} The signature algorithm (can be RSA or ECDSA URN)
+ * @param keyType {'RSA' | 'EC'} The detected key type
+ * @return {string | undefined} The normalized signature algorithm matching the key type, or undefined if no algorithm specified
+ * 
+ * This function handles algorithm conversion when RSA algorithm is specified but key is EC.
+ * It converts RSA signature algorithms to their equivalent ECDSA algorithms.
+ * 
+ * If no algorithm is specified (undefined), it returns undefined without adding a default.
+ * This allows calling code to handle its own default algorithm logic.
+ * 
+ * This ensures that the signature algorithm always matches the key type, preventing signature failures.
+ */
+export function normalizeSignatureAlgorithm(
+  algorithm: string | undefined,
+  keyType: 'RSA' | 'EC'
+): string | undefined {
+  const signatureAlgorithms = algorithms.signature;
+  
+  // If no algorithm specified, return undefined (let caller handle default)
+  if (!algorithm) {
+    return undefined;
+  }
+  
+  // Convert RSA to ECDSA if key is EC
+  if (keyType === 'EC' && algorithm.toLowerCase().includes('rsa')) {
+    if (algorithm.toLowerCase().includes('sha512')) {
+      return signatureAlgorithms.ECDSA_SHA512;
+    } else if (algorithm.toLowerCase().includes('sha384')) {
+      return signatureAlgorithms.ECDSA_SHA384;
+    } else if (algorithm.toLowerCase().includes('sha1')) {
+      return signatureAlgorithms.ECDSA_SHA1;
+    } else {
+      // Default to SHA256 for any other SHA variant or unrecognized
+      return signatureAlgorithms.ECDSA_SHA256;
+    }
+  }
+  
+  // Return algorithm as-is if no conversion needed
+  return algorithm;
+}
+
 const utility = {
   isString,
   base64Encode,
@@ -446,6 +490,7 @@ const utility = {
   convertToString,
   isNonEmptyArray,
   detectKeyType,
+  normalizeSignatureAlgorithm,
 };
 
 export default utility;

@@ -146,6 +146,7 @@ const algorithms = {
     RSA_SHA1: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
     RSA_SHA256: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
     RSA_SHA512: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512',
+    ECDSA_SHA1: 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1',
     ECDSA_SHA256: 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256',
     ECDSA_SHA384: 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384',
     ECDSA_SHA512: 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512',
@@ -167,6 +168,7 @@ const algorithms = {
     'http://www.w3.org/2000/09/xmldsig#rsa-sha1': 'http://www.w3.org/2000/09/xmldsig#sha1',
     'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256': 'http://www.w3.org/2001/04/xmlenc#sha256',
     'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512': 'http://www.w3.org/2001/04/xmlenc#sha512', // support hashing algorithm sha512 in xml-crypto after 0.8.0
+    'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1': 'http://www.w3.org/2000/09/xmldsig#sha1',
     'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256': 'http://www.w3.org/2001/04/xmlenc#sha256',
     'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384': 'http://www.w3.org/2001/04/xmlenc#sha384',
     'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512': 'http://www.w3.org/2001/04/xmlenc#sha512',

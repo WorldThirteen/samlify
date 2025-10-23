@@ -199,8 +199,8 @@ function resolveVerifyAlgorithm(algo?: string): VerifyAlgo {
     "ecdsa-sha512": { name: "ECDSA", hash: "SHA-512" },
   };
 
-  // Default to modern RSA SHA-256 if unspecified
-  return map[a] ?? { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" };
+  // Default to RSA SHA-1 if unspecified (backward compatible with master branch)
+  return map[a] ?? { name: "RSASSA-PKCS1-v1_5", hash: "SHA-1" };
 }
 
 /**
@@ -228,7 +228,28 @@ export async function verifyMessageSignature(
       verifyAlgorithm ?? metadata.getSignatureAlgorithm?.()
     );
 
-    const key = await cert.publicKey.export(crypto);
+    // Export raw key material from certificate
+    const peculiarKey = await cert.publicKey.export(crypto);
+    const rawKey = await crypto.subtle.exportKey('spki', peculiarKey);
+
+    // Build algorithm for re-import
+    // For ECDSA, we need to preserve the namedCurve from the original key
+    let importAlgo: any = algo;
+    if (algo.name === 'ECDSA' && peculiarKey.algorithm && 'namedCurve' in peculiarKey.algorithm) {
+      importAlgo = {
+        ...algo,
+        namedCurve: (peculiarKey.algorithm as any).namedCurve
+      };
+    }
+
+    // Re-import with the correct algorithm for verification
+    const key = await crypto.subtle.importKey(
+      'spki',
+      rawKey,
+      importAlgo,  // This includes the correct hash algorithm (and namedCurve for ECDSA)
+      false,
+      ['verify']
+    );
 
     const ok = await crypto.subtle.verify(
       algo,                                // includes { name, hash }
@@ -238,7 +259,7 @@ export async function verifyMessageSignature(
     );
 
     return !!ok;
-  } catch {
+  } catch (err) {
     return false;
   }
 }

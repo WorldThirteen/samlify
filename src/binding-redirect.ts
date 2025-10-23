@@ -70,18 +70,11 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
     const decryptedKeyString = utility.readPrivateKey(keyString, entitySetting.privateKeyPass);
     const keyType = utility.detectKeyType(decryptedKeyString);
     
-    // Use EC algorithm if key is EC, otherwise use the configured algorithm
-    let signatureAlgorithm = entitySetting.requestSignatureAlgorithm;
-    if (keyType === 'EC' && signatureAlgorithm.includes('rsa')) {
-      // Convert RSA algorithm to equivalent ECDSA algorithm
-      if (signatureAlgorithm.includes('sha512')) {
-        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512';
-      } else if (signatureAlgorithm.includes('sha384')) {
-        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384';
-      } else {
-        signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256';
-      }
-    }
+    // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+    const signatureAlgorithm = utility.normalizeSignatureAlgorithm(
+      entitySetting.requestSignatureAlgorithm,
+      keyType
+    ) || entitySetting.requestSignatureAlgorithm; // Fallback to original if no normalization needed
     
     const sigAlg = pvPair(urlParams.sigAlg, encodeURIComponent(signatureAlgorithm));
     const octetString = samlRequest + relayState + sigAlg;
