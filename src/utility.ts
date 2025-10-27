@@ -50,8 +50,8 @@ export function zipObject(arr1: string[], arr2: any[], skipDuplicated = true) {
  */
 export function flattenDeep(input: any[]) {
   return Array.isArray(input)
-  ? input.reduce( (a, b) => a.concat(flattenDeep(b)) , [])
-  : [input];
+    ? input.reduce((a, b) => a.concat(flattenDeep(b)), [])
+    : [input];
 }
 /**
  * @desc Alternative to lodash.last
@@ -68,7 +68,7 @@ export function last(input: any[]) {
  */
 export function uniq(input: string[]) {
   const set = new Set(input);
-  return [... set];
+  return [...set];
 }
 /**
  * @desc Alternative to lodash.get
@@ -79,7 +79,7 @@ export function uniq(input: string[]) {
  */
 export function get(obj, path, defaultValue) {
   return path.split('.')
-  .reduce((a, c) => (a && a[c] ? a[c] : (defaultValue || null)), obj);
+    .reduce((a, c) => (a && a[c] ? a[c] : (defaultValue || null)), obj);
 }
 /**
  * @desc Check if the input is string
@@ -188,12 +188,12 @@ function getPublicKeyPemFromCertificate(x509Certificate: string) {
     // Wrap the certificate in PEM format
     const pem = `-----BEGIN CERTIFICATE-----\n${x509Certificate.match(/.{1,64}/g)?.join('\n')}\n-----END CERTIFICATE-----`;
     const cert = new x509.X509Certificate(pem);
-    
+
     // Export public key in PEM format
     const publicKeyDer = cert.publicKey.rawData;
     const publicKeyBase64 = Buffer.from(publicKeyDer).toString('base64');
     const publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicKeyBase64.match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----`;
-    
+
     return publicKeyPem;
   } catch (e) {
     // Fallback to node-forge for RSA certificates (legacy support)
@@ -218,9 +218,9 @@ export function readPrivateKey(keyString: string | Buffer, passphrase: string | 
   if (!isString(passphrase)) {
     return keyString;
   }
-  
+
   const keyStr = String(keyString);
-  
+
   // For encrypted PKCS#8, use Node.js crypto which supports both RSA and EC
   if (keyStr.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
     // Node.js crypto can decrypt and re-export encrypted PKCS#8 keys
@@ -237,7 +237,7 @@ export function readPrivateKey(keyString: string | Buffer, passphrase: string | 
     });
     return this.convertToString(decryptedPem, isOutputString);
   }
-  
+
   // For legacy encrypted formats (e.g., BEGIN RSA PRIVATE KEY with encryption)
   return this.convertToString(pki.privateKeyToPem(pki.decryptRsaPrivateKey(keyStr, passphrase as string)), isOutputString);
 }
@@ -310,10 +310,10 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
   if (!keyOrCert) {
     throw new Error('Key or certificate is required for key type detection');
   }
-  
+
   // Convert Buffer to string if needed
   const keyString = Buffer.isBuffer(keyOrCert) ? keyOrCert.toString('utf8') : keyOrCert;
-  
+
   // Strategy 1: Fast path - Check PEM headers for explicit type markers
   // These formats include the key type in the header itself, so detection is certain
   if (keyString.includes('EC PRIVATE KEY') || keyString.includes('EC PUBLIC KEY')) {
@@ -322,7 +322,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
   if (keyString.includes('RSA PRIVATE KEY') || keyString.includes('RSA PUBLIC KEY')) {
     return 'RSA'; // PKCS#1 format (RFC 8017)
   }
-  
+
   // Strategy 2: PKCS#8 format - Use proper ASN.1 parsing library
   // This is the most common format for modern keys
   if (keyString.includes('PRIVATE KEY') && !keyString.includes('ENCRYPTED')) {
@@ -332,11 +332,11 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
         .replace(/-----BEGIN [^-]+-----/, '')
         .replace(/-----END [^-]+-----/, '')
         .replace(/\s+/g, '');
-      
+
       const der = Buffer.from(pemContent, 'base64');
       const privateKeyInfo = AsnParser.parse(der, PrivateKeyInfo);
       const algorithm = privateKeyInfo.privateKeyAlgorithm.algorithm;
-      
+
       // Check against standard OIDs
       if (algorithm === id_ecPublicKey) {
         return 'EC';
@@ -344,7 +344,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
       if (algorithm === id_rsaEncryption) {
         return 'RSA';
       }
-      
+
       // Check OID prefixes for algorithm families
       // EC family: 1.2.840.10045.* (ansi-x962)
       // RSA family: 1.2.840.113549.1.1.* (pkcs-1)
@@ -354,7 +354,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
       if (algorithm.startsWith('1.2.840.113549.1.1')) {
         return 'RSA';
       }
-      
+
       // Unknown algorithm OID
       throw new Error(
         `Unsupported key algorithm OID: ${algorithm}. ` +
@@ -370,7 +370,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
       );
     }
   }
-  
+
   // Strategy 3: X.509 Certificate - Use existing @peculiar/x509 dependency
   if (keyString.includes('CERTIFICATE')) {
     try {
@@ -379,24 +379,24 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
         .replace(/-----BEGIN [^-]+-----/, '')
         .replace(/-----END [^-]+-----/, '')
         .replace(/\s+/g, '');
-      
+
       const der = Buffer.from(pemContent, 'base64');
       // Convert Buffer to Uint8Array for x509 library
       const uint8Array = new Uint8Array(der);
       const cert = new x509.X509Certificate(uint8Array);
       const algorithm = cert.publicKey.algorithm.name;
-      
+
       // Check for EC algorithms
       if (algorithm === 'ECDSA' || algorithm === 'ECDH') {
         return 'EC';
       }
-      
+
       // Check for RSA algorithms
-      if (algorithm === 'RSA' || algorithm === 'RSASSA-PKCS1-v1_5' || 
-          algorithm === 'RSA-PSS' || algorithm === 'RSA-OAEP') {
+      if (algorithm === 'RSA' || algorithm === 'RSASSA-PKCS1-v1_5' ||
+        algorithm === 'RSA-PSS' || algorithm === 'RSA-OAEP') {
         return 'RSA';
       }
-      
+
       // Unknown algorithm
       throw new Error(
         `Unsupported certificate algorithm: ${algorithm}. ` +
@@ -412,7 +412,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
       );
     }
   }
-  
+
   // Encrypted PKCS#8 - Cannot reliably detect without decrypting
   // The encryption wrapper hides the algorithm identifier
   if (keyString.includes('ENCRYPTED PRIVATE KEY')) {
@@ -422,7 +422,7 @@ export function detectKeyType(keyOrCert: string | Buffer | undefined): 'RSA' | '
       'Please decrypt the key first or use key type detection after decryption.'
     );
   }
-  
+
   // Unknown key format
   throw new Error(
     'Unable to detect key type: unrecognized key format. ' +
@@ -450,12 +450,12 @@ export function normalizeSignatureAlgorithm(
   keyType: 'RSA' | 'EC'
 ): string | undefined {
   const signatureAlgorithms = algorithms.signature;
-  
+
   // If no algorithm specified, return undefined (let caller handle default)
   if (!algorithm) {
     return undefined;
   }
-  
+
   // Convert RSA to ECDSA if key is EC
   if (keyType === 'EC' && algorithm.toLowerCase().includes('rsa')) {
     if (algorithm.toLowerCase().includes('sha512')) {
@@ -469,9 +469,139 @@ export function normalizeSignatureAlgorithm(
       return signatureAlgorithms.ECDSA_SHA256;
     }
   }
-  
+
   // Return algorithm as-is if no conversion needed
   return algorithm;
+}
+
+/**
+ * @desc Convert PEM-encoded key to DER format (for WebCrypto importKey)
+ * @param pem {string} PEM-encoded key (with BEGIN/END headers)
+ * @return {Buffer} DER-encoded key as Buffer
+ */
+export function pemToDer(pem: string): Buffer {
+  // Remove PEM headers and decode base64
+  const pemContent = pem
+    .replace(/-----BEGIN [A-Z ]+-----/, '')
+    .replace(/-----END [A-Z ]+-----/, '')
+    .replace(/\s+/g, '');
+
+  return Buffer.from(pemContent, 'base64');
+}
+
+/**
+ * @desc Convert ECDSA signature from DER format to IEEE P1363 format (raw r|s)
+ * Node.js crypto.sign() produces DER format, but XML signatures require IEEE P1363
+ * @param derSignature {Buffer} DER-encoded signature
+ * @return {Buffer} IEEE P1363 encoded signature (raw r||s concatenation)
+ */
+export function derToP1363(derSignature: Buffer): Buffer {
+  // DER format: 0x30 <total-length> 0x02 <r-length> <r-value> 0x02 <s-length> <s-value>
+
+  if (derSignature.length < 8) {
+    throw new Error('DER signature too short');
+  }
+
+  if (derSignature[0] !== 0x30) {
+    throw new Error('Invalid DER signature - missing SEQUENCE marker');
+  }
+
+  let offset = 2; // Skip SEQUENCE marker and length
+
+  // Read r value
+  if (derSignature[offset] !== 0x02) {
+    throw new Error('Invalid DER signature - missing INTEGER marker for r');
+  }
+  offset++;
+
+  const rLength = derSignature[offset];
+  offset++;
+
+  let r = derSignature.subarray(offset, offset + rLength);
+  offset += rLength;
+
+  // Remove leading 0x00 byte if present (DER padding for positive integers)
+  if (r[0] === 0x00 && r.length > 1) {
+    r = r.subarray(1);
+  }
+
+  // Read s value
+  if (derSignature[offset] !== 0x02) {
+    throw new Error('Invalid DER signature - missing INTEGER marker for s');
+  }
+  offset++;
+
+  const sLength = derSignature[offset];
+  offset++;
+
+  let s = derSignature.subarray(offset, offset + sLength);
+
+  // Remove leading 0x00 byte if present
+  if (s[0] === 0x00 && s.length > 1) {
+    s = s.subarray(1);
+  }
+
+  // Determine the field size (r and s should be the same length in P1363)
+  const fieldSize = Math.max(r.length, s.length);
+
+  // Pad r and s to field size
+  const rPadded = Buffer.alloc(fieldSize);
+  r.copy(rPadded, fieldSize - r.length);
+
+  const sPadded = Buffer.alloc(fieldSize);
+  s.copy(sPadded, fieldSize - s.length);
+
+  // Concatenate r || s
+  return Buffer.concat([rPadded, sPadded]);
+}
+
+/**
+ * @desc Convert ECDSA signature from IEEE P1363 format to DER format
+ * WebCrypto and XML signatures use P1363, but Node.js crypto.verify() expects DER
+ * @param p1363Signature {Buffer} IEEE P1363 encoded signature (raw r||s)
+ * @return {Buffer} DER-encoded signature
+ */
+export function p1363ToDer(p1363Signature: Buffer): Buffer {
+  // P1363 format is r || s concatenated, each component is the same length
+  const componentLength = p1363Signature.length / 2;
+
+  let r = p1363Signature.subarray(0, componentLength);
+  let s = p1363Signature.subarray(componentLength);
+
+  // Remove leading zeros from r and s (but keep at least one byte)
+  while (r.length > 1 && r[0] === 0x00) {
+    r = r.subarray(1);
+  }
+  while (s.length > 1 && s[0] === 0x00) {
+    s = s.subarray(1);
+  }
+
+  // Add leading 0x00 if high bit is set (DER requirement for positive integers)
+  if (r[0] & 0x80) {
+    r = Buffer.concat([Buffer.from([0x00]), r]);
+  }
+  if (s[0] & 0x80) {
+    s = Buffer.concat([Buffer.from([0x00]), s]);
+  }
+
+  // Build DER structure: 0x30 <total-length> 0x02 <r-length> <r> 0x02 <s-length> <s>
+  const derLength = 2 + r.length + 2 + s.length; // 2 bytes for each INTEGER marker+length
+  const der = Buffer.alloc(2 + derLength);
+
+  let offset = 0;
+  der[offset++] = 0x30; // SEQUENCE marker
+  der[offset++] = derLength; // Total length
+
+  der[offset++] = 0x02; // INTEGER marker for r
+  der[offset++] = r.length;
+  r.copy(der, offset);
+  offset += r.length;
+
+  der[offset++] = 0x02; // INTEGER marker for s
+  der[offset++] = s.length;
+  s.copy(der, offset);
+
+  return der;
 }
 
 const utility = {
@@ -491,6 +621,9 @@ const utility = {
   isNonEmptyArray,
   detectKeyType,
   normalizeSignatureAlgorithm,
+  pemToDer,
+  derToP1363,
+  p1363ToDer,
 };
 
 export default utility;

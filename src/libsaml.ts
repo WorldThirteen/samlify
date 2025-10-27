@@ -24,6 +24,7 @@ import { verifyMessageSignature } from './verify';
 import * as nodeCrypto from 'crypto';
 
 const crypto = new Crypto();
+const webcrypto = crypto;
 
 xmldsigjs.Application.setEngine('NodeJS', crypto);
 
@@ -331,12 +332,14 @@ const libSaml = () => {
           getSignature(signedInfo: string, privateKey: string | Buffer): string {
             const sign = nodeCrypto.createSign(hashAlgorithm);
             sign.update(signedInfo);
-            const signature = sign.sign({
+            const derSignature = sign.sign({
               key: privateKey.toString(),
               format: 'pem',
               type: 'pkcs8'
             });
-            return signature.toString('base64');
+            // Convert DER signature to IEEE P1363 format for ECDSA
+            const p1363Signature = utility.derToP1363(derSignature);
+            return p1363Signature.toString('base64');
           }
           
           verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
@@ -358,7 +361,11 @@ const libSaml = () => {
               }
             }
             
-            return verify.verify(certKey, signatureValue, 'base64');
+            // Convert P1363 signature to DER for Node.js crypto.verify()
+            const p1363Sig = Buffer.from(signatureValue, 'base64');
+            const derSig = utility.p1363ToDer(p1363Sig);
+            
+            return verify.verify(certKey, derSig);
           }
           
           getAlgorithmName(): string {
@@ -474,33 +481,65 @@ const libSaml = () => {
       // Decrypt the key if encrypted
       const decryptedKey = utility.readPrivateKey(privateKey, privateKeyPass, true) as string;
       
-      // Determine hash algorithm from signature algorithm
-      let hashAlgorithm = 'SHA256';
+      // Determine hash algorithm from signature algorithm (WebCrypto format)
+      let hashAlgorithm = 'SHA-256';
       if (signatureAlgorithm.includes('sha512')) {
-        hashAlgorithm = 'SHA512';
+        hashAlgorithm = 'SHA-512';
       } else if (signatureAlgorithm.includes('sha384')) {
-        hashAlgorithm = 'SHA384';
+        hashAlgorithm = 'SHA-384';
       } else if (signatureAlgorithm.includes('sha1')) {
-        hashAlgorithm = 'SHA1';
+        hashAlgorithm = 'SHA-1';
+      }
+      
+      // Determine named curve from key
+      let namedCurve = 'P-256';
+      if (decryptedKey.includes('BEGIN EC PRIVATE KEY') || decryptedKey.includes('BEGIN PRIVATE KEY')) {
+        // Try to detect curve from key content (basic heuristic)
+        // P-384 keys are typically larger, P-521 even larger
+        if (decryptedKey.length > 500) {
+          namedCurve = 'P-521';
+        } else if (decryptedKey.length > 350) {
+          namedCurve = 'P-384';
+        }
       }
       
       // Create a custom ECDSA signature algorithm class for xml-crypto
+      // Uses Node.js crypto and converts DER to IEEE P1363 format (raw r|s) for XML signatures
       class ECDSASignatureAlgorithm {
         getSignature(signedInfo: string, privateKey: string | Buffer): string {
-          const sign = nodeCrypto.createSign(hashAlgorithm);
+          const hashAlgNode = hashAlgorithm.replace('-', ''); // Convert SHA-256 to SHA256
+          const sign = nodeCrypto.createSign(hashAlgNode);
           sign.update(signedInfo);
-          const signature = sign.sign({
+          const derSignature = sign.sign({
             key: privateKey.toString(),
             format: 'pem',
             type: 'pkcs8'
           });
-          return signature.toString('base64');
+          
+          // Convert DER signature to IEEE P1363 format
+          const p1363Signature = utility.derToP1363(derSignature);
+          return p1363Signature.toString('base64');
         }
         
         verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
-          const verify = nodeCrypto.createVerify(hashAlgorithm);
+          // xml-crypto provides P1363 format signature, but Node.js crypto.verify expects DER
+          const hashAlgNode = hashAlgorithm.replace('-', ''); // Convert SHA-256 to SHA256
+          const verify = nodeCrypto.createVerify(hashAlgNode);
           verify.update(str);
-          return verify.verify(key.toString(), signatureValue, 'base64');
+          
+          // Convert key to PEM if it's DER format
+          let keyPem = key.toString();
+          if (!keyPem.includes('BEGIN CERTIFICATE') && !keyPem.includes('BEGIN PUBLIC KEY')) {
+            // Assume it's DER format, convert to PEM
+            const keyDer = typeof key === 'string' ? Buffer.from(key, 'base64') : key;
+            keyPem = `-----BEGIN CERTIFICATE-----\n${keyDer.toString('base64').match(/.{1,64}/g)?.join('\n')}\n-----END CERTIFICATE-----`;
+          }
+          
+          // Convert P1363 signature to DER for Node.js crypto.verify()
+          const p1363Sig = Buffer.from(signatureValue, 'base64');
+          const derSig = utility.p1363ToDer(p1363Sig);
+          
+          return verify.verify(keyPem, derSig);
         }
         
         getAlgorithmName(): string {
@@ -813,14 +852,17 @@ const libSaml = () => {
         
         const sign = nodeCrypto.createSign(hashAlgorithm);
         sign.update(octetString);
-        const signature = sign.sign({
+        const derSignature = sign.sign({
           key: pemKey,
           format: 'pem',
           type: 'pkcs8'
           // No passphrase needed - key is already decrypted
         });
         
-        return isBase64 !== false ? signature.toString('base64') : signature;
+        // Convert DER signature to IEEE P1363 format for ECDSA
+        const p1363Signature = utility.derToP1363(derSignature);
+        
+        return isBase64 !== false ? p1363Signature.toString('base64') : p1363Signature;
       } else {
         // RSA signing using node-rsa
         // Default returning base64 encoded signature
