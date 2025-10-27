@@ -48,14 +48,24 @@ COMMIT_MSG=$(git log -1 --pretty=%B)
 
 echo "📤 Preparing to push to $DIST_BRANCH..."
 
+# Save build artifacts to temp location
+TEMP_BUILD_DIR=$(mktemp -d)
+echo "💾 Copying build artifacts to temp location..."
+cp -r build "$TEMP_BUILD_DIR/"
+cp -r types "$TEMP_BUILD_DIR/" 2>/dev/null || echo "No types directory to copy"
+
 # Create or checkout dist branch
 if git show-ref --verify --quiet refs/heads/$DIST_BRANCH; then
   echo "Checking out existing $DIST_BRANCH branch..."
   git checkout $DIST_BRANCH
+  # Clean the dist branch
+  git rm -rf . 2>/dev/null || true
+  rm -rf * .gitignore 2>/dev/null || true
 else
   echo "Creating new $DIST_BRANCH branch..."
   git checkout --orphan $DIST_BRANCH
   git rm -rf . 2>/dev/null || true
+  rm -rf * .gitignore 2>/dev/null || true
 fi
 
 # Copy essential files to dist branch
@@ -68,9 +78,13 @@ git checkout $CURRENT_BRANCH -- LICENSE
 git checkout $CURRENT_BRANCH -- index.ts
 git checkout $CURRENT_BRANCH -- CHANGELOG.md 2>/dev/null || true
 
-# Copy build output (these are gitignored in source branch)
-cp -r build .
-cp -r types .
+# Copy build output from temp location
+echo "📦 Restoring build artifacts..."
+cp -r "$TEMP_BUILD_DIR/build" .
+cp -r "$TEMP_BUILD_DIR/types" . 2>/dev/null || echo "No types to restore"
+
+# Clean up temp directory
+rm -rf "$TEMP_BUILD_DIR"
 
 # Create/update .gitignore for dist branch (we want to commit build artifacts here)
 cat > .gitignore << 'EOF'
