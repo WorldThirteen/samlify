@@ -1,0 +1,8 @@
+# Only ignore dependencies in dist branch
+node_modules
+.nyc_output
+.vscode
+.idea
+*.log
+*.tgz
+package-lock.json

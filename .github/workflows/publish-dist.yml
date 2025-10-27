@@ -1,0 +1,101 @@
+name: Publish Distribution Branch
+
+# This workflow automatically builds and publishes to the dist branch
+# whenever you push to ec-keys-support or master branches
+
+on:
+  push:
+    branches:
+      - ec-keys-support
+      - master
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  publish-dist:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for all branches
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Enable Corepack
+        run: corepack enable
+      
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+      
+      - name: Build project
+        run: make rebuild
+      
+      - name: Generate type definitions
+        run: npx tsc --declaration --emitDeclarationOnly --outDir types || echo "Type generation skipped"
+      
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+      
+      - name: Publish to dist branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DIST_BRANCH="dist"
+          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
+          echo "Publishing from $CURRENT_BRANCH@$COMMIT_HASH to $DIST_BRANCH"
+          
+          # Create or checkout dist branch
+          git checkout -B $DIST_BRANCH
+          
+          # Remove everything except what we need
+          git rm -rf . || true
+          
+          # Checkout essential files
+          git checkout $CURRENT_BRANCH -- package.json README.md LICENSE index.ts CHANGELOG.md 2>/dev/null || true
+          
+          # Copy build artifacts
+          cp -r build .
+          cp -r types . 2>/dev/null || true
+          
+          # Create .gitignore for dist branch
+          cat > .gitignore << 'EOF'
+          node_modules
+          .nyc_output
+          .vscode
+          .idea
+          *.log
+          *.tgz
+          package-lock.json
+          EOF
+          
+          # Create dist README
+          cat > DIST_README.md << EOF
+          # Samlify (Distribution Branch)
+          
+          Pre-built distribution from $CURRENT_BRANCH@$COMMIT_HASH
+          
+          ## Installation
+          \`\`\`bash
+          npm install github:WorldThirteen/samlify#dist
+          \`\`\`
+          
+          Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          EOF
+          
+          # Stage and commit
+          git add -A
+          git commit -m "Build from $CURRENT_BRANCH@$COMMIT_HASH" || echo "No changes to commit"
+          
+          # Push to dist branch
+          git push origin $DIST_BRANCH --force
+          
+          echo "✅ Published to $DIST_BRANCH branch"
