@@ -11,12 +11,13 @@ import { MetadataInterface } from './metadata';
 import nrsa, { SigningSchemeHash } from 'node-rsa';
 import { SignedXml } from 'xml-crypto';
 import * as xmlenc from '@authenio/xml-encryption';
-import { extract } from './extractor';
 import camelCase from 'camelcase';
 import { getContext } from './api';
 import xmlEscape from 'xml-escape';
 import * as fs from 'fs';
 import {DOMParser} from '@xmldom/xmldom';
+import { verifyMessageSignature } from './verify';
+import * as nodeCrypto from 'crypto';
 
 const signatureAlgorithms = algorithms.signature;
 const digestAlgorithms = algorithms.digest;
@@ -96,9 +97,9 @@ export interface LibSamlInterface {
   constructSAMLSignature: (opts: SignatureConstructor) => string;
   verifySignature: (xml: string, opts: SignatureVerifierOptions) => [boolean, any];
   createKeySection: (use: KeyUse, cert: string | Buffer) => {};
-  constructMessageSignature: (octetString: string, key: string, passphrase?: string, isBase64?: boolean, signingAlgorithm?: string) => string;
+  constructMessageSignature: (octetString: string, key: string | Buffer, passphrase?: string, isBase64?: boolean, signingAlgorithm?: string) => string;
 
-  verifyMessageSignature: (metadata, octetString: string, signature: string | Buffer, verifyAlgorithm?: string) => boolean;
+  verifyMessageSignature: (metadata, octetString: string, signature: string | Buffer, verifyAlgorithm?: string) => Promise<boolean>;
   getKeyInfo: (x509Certificate: string, signatureConfig?: any) => void;
   encryptAssertion: (sourceEntity, targetEntity, entireXML: string) => Promise<string>;
   decryptAssertion: (here, entireXML: string) => Promise<[string, any]>;
@@ -311,7 +312,95 @@ const libSaml = () => {
     * @param  {string[]} transformationAlgorithms   canonicalization and transformation Algorithms
     * @return {string} base64 encoded string
     */
+    /**
+    * @desc Register ECDSA signature algorithms with xml-crypto
+    * @param sig SignedXml instance to register algorithms on
+    */
+    registerECDSAAlgorithms(sig: SignedXml) {
+      // Helper to create ECDSA algorithm class for a specific hash
+      const createECDSAAlgorithm = (hashAlgorithm: string) => {
+        return class ECDSASignatureAlgorithm {
+          getSignature(signedInfo: string, privateKey: string | Buffer): string {
+            const sign = nodeCrypto.createSign(hashAlgorithm);
+            sign.update(signedInfo);
+            const derSignature = sign.sign({
+              key: privateKey.toString(),
+              format: 'pem',
+              type: 'pkcs8'
+            });
+            // Convert DER signature to IEEE P1363 format for ECDSA
+            const p1363Signature = utility.derToP1363(derSignature);
+            return p1363Signature.toString('base64');
+          }
+          
+          verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
+            const verify = nodeCrypto.createVerify(hashAlgorithm);
+            verify.update(str);
+            
+            // Handle both PEM and DER format certificates
+            let certKey: string | Buffer = key;
+            if (Buffer.isBuffer(key)) {
+              // Check if it's DER format (binary) - try to convert to PEM
+              const keyString = key.toString('utf8');
+              if (!keyString.includes('-----BEGIN')) {
+                // It's likely DER format - convert to PEM
+                const base64Cert = key.toString('base64');
+                const pemCert = '-----BEGIN CERTIFICATE-----\n' + 
+                  base64Cert.match(/.{1,64}/g)?.join('\n') + 
+                  '\n-----END CERTIFICATE-----\n';
+                certKey = pemCert;
+              }
+            }
+            
+            // Convert P1363 signature to DER for Node.js crypto.verify()
+            const p1363Sig = Buffer.from(signatureValue, 'base64');
+            const derSig = utility.p1363ToDer(p1363Sig);
+            
+            return verify.verify(certKey, derSig);
+          }
+          
+          getAlgorithmName(): string {
+            return hashAlgorithm;
+          }
+        };
+      };
+      
+      // Register all ECDSA variants
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha1'] = createECDSAAlgorithm('SHA1') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256'] = createECDSAAlgorithm('SHA256') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384'] = createECDSAAlgorithm('SHA384') as any;
+      sig.SignatureAlgorithms['http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512'] = createECDSAAlgorithm('SHA512') as any;
+    },
+    
     constructSAMLSignature(opts: SignatureConstructor) {
+      // Decrypt key first if encrypted, then detect type
+      const keyString = Buffer.isBuffer(opts.privateKey) 
+        ? opts.privateKey.toString('utf8') 
+        : opts.privateKey;
+      const decryptedKeyString = utility.readPrivateKey(keyString, opts.privateKeyPass);
+      const keyType = utility.detectKeyType(decryptedKeyString);
+      
+      // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+      const signatureAlgorithm = utility.normalizeSignatureAlgorithm(
+        opts.signatureAlgorithm,
+        keyType
+      );
+      
+      if (keyType === 'EC') {
+        // Use xml-crypto with custom EC signer
+        return this.constructECXMLSignature({
+          ...opts,
+          signatureAlgorithm: signatureAlgorithm || signatureAlgorithms.ECDSA_SHA256
+        });
+      } else {
+        // Use xml-crypto for RSA signatures
+        return this.constructRSAXMLSignature(opts);
+      }
+    },
+    /**
+    * @desc Construct RSA XML signature using xml-crypto
+    */
+    constructRSAXMLSignature(opts: SignatureConstructor) {
       const {
         rawSamlMessage,
         referenceTagXPath,
@@ -327,6 +416,7 @@ const libSaml = () => {
         isBase64Output = true,
         isMessageSigned = false,
       } = opts;
+
       const sig = new SignedXml();
       // Add assertion sections as reference
       const digestAlgorithm = getDigestMethod(signatureAlgorithm);
@@ -356,6 +446,134 @@ const libSaml = () => {
       } else {
         sig.computeSignature(rawSamlMessage);
       }
+      return isBase64Output !== false ? utility.base64Encode(sig.getSignedXml()) : sig.getSignedXml();
+    },
+    /**
+    * @desc Construct EC XML signature using xml-crypto with custom signer
+    * Note: xml-crypto doesn't natively support ECDSA, so we register a custom signature algorithm
+    */
+    constructECXMLSignature(opts: SignatureConstructor) {
+      const {
+        rawSamlMessage,
+        referenceTagXPath,
+        privateKey,
+        privateKeyPass,
+        signatureAlgorithm = signatureAlgorithms.ECDSA_SHA256,
+        transformationAlgorithms = [
+          'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+          'http://www.w3.org/2001/10/xml-exc-c14n#',
+        ],
+        signingCert,
+        signatureConfig,
+        isBase64Output = true,
+        isMessageSigned = false,
+      } = opts;
+
+      // Decrypt the key if encrypted
+      const decryptedKey = utility.readPrivateKey(privateKey, privateKeyPass, true) as string;
+      
+      // Determine hash algorithm from signature algorithm (WebCrypto format)
+      let hashAlgorithm = 'SHA-256';
+      if (signatureAlgorithm.includes('sha512')) {
+        hashAlgorithm = 'SHA-512';
+      } else if (signatureAlgorithm.includes('sha384')) {
+        hashAlgorithm = 'SHA-384';
+      } else if (signatureAlgorithm.includes('sha1')) {
+        hashAlgorithm = 'SHA-1';
+      }
+      
+      // Determine named curve from key
+      let namedCurve = 'P-256';
+      if (decryptedKey.includes('BEGIN EC PRIVATE KEY') || decryptedKey.includes('BEGIN PRIVATE KEY')) {
+        // Try to detect curve from key content (basic heuristic)
+        // P-384 keys are typically larger, P-521 even larger
+        if (decryptedKey.length > 500) {
+          namedCurve = 'P-521';
+        } else if (decryptedKey.length > 350) {
+          namedCurve = 'P-384';
+        }
+      }
+      
+      // Create a custom ECDSA signature algorithm class for xml-crypto
+      // Uses Node.js crypto and converts DER to IEEE P1363 format (raw r|s) for XML signatures
+      class ECDSASignatureAlgorithm {
+        getSignature(signedInfo: string, privateKey: string | Buffer): string {
+          const hashAlgNode = hashAlgorithm.replace('-', ''); // Convert SHA-256 to SHA256
+          const sign = nodeCrypto.createSign(hashAlgNode);
+          sign.update(signedInfo);
+          const derSignature = sign.sign({
+            key: privateKey.toString(),
+            format: 'pem',
+            type: 'pkcs8'
+          });
+          
+          // Convert DER signature to IEEE P1363 format
+          const p1363Signature = utility.derToP1363(derSignature);
+          return p1363Signature.toString('base64');
+        }
+        
+        verifySignature(str: string, key: string | Buffer, signatureValue: string): boolean {
+          // xml-crypto provides P1363 format signature, but Node.js crypto.verify expects DER
+          const hashAlgNode = hashAlgorithm.replace('-', ''); // Convert SHA-256 to SHA256
+          const verify = nodeCrypto.createVerify(hashAlgNode);
+          verify.update(str);
+          
+          // Convert key to PEM if it's DER format
+          let keyPem = key.toString();
+          if (!keyPem.includes('BEGIN CERTIFICATE') && !keyPem.includes('BEGIN PUBLIC KEY')) {
+            // Assume it's DER format, convert to PEM
+            const keyDer = typeof key === 'string' ? Buffer.from(key, 'base64') : key;
+            keyPem = `-----BEGIN CERTIFICATE-----\n${keyDer.toString('base64').match(/.{1,64}/g)?.join('\n')}\n-----END CERTIFICATE-----`;
+          }
+          
+          // Convert P1363 signature to DER for Node.js crypto.verify()
+          const p1363Sig = Buffer.from(signatureValue, 'base64');
+          const derSig = utility.p1363ToDer(p1363Sig);
+          
+          return verify.verify(keyPem, derSig);
+        }
+        
+        getAlgorithmName(): string {
+          return signatureAlgorithm;
+        }
+      }
+      
+      // Create a custom SignedXml instance with ECDSA support
+      const sig = new SignedXml();
+      
+      // Register the custom ECDSA algorithm
+      sig.SignatureAlgorithms[signatureAlgorithm] = ECDSASignatureAlgorithm as any;
+      
+      // Add assertion sections as reference
+      const digestAlgorithm = getDigestMethod(signatureAlgorithm);
+      if (referenceTagXPath) {
+        sig.addReference({
+          xpath: referenceTagXPath,
+          transforms: transformationAlgorithms,
+          digestAlgorithm: digestAlgorithm
+        });
+      }
+      if (isMessageSigned) {
+        sig.addReference({
+          // reference to the root node
+          xpath: '/*',
+          transforms: transformationAlgorithms,
+          digestAlgorithm
+        });
+      }
+      
+      sig.signatureAlgorithm = signatureAlgorithm;
+      sig.publicCert = this.getKeyInfo(signingCert, signatureConfig).getKey();
+      sig.getKeyInfoContent = this.getKeyInfo(signingCert, signatureConfig).getKeyInfo;
+      sig.privateKey = decryptedKey;
+      sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+      
+      if (signatureConfig) {
+        sig.computeSignature(rawSamlMessage, signatureConfig);
+      } else {
+        sig.computeSignature(rawSamlMessage);
+      }
+      
       return isBase64Output !== false ? utility.base64Encode(sig.getSignedXml()) : sig.getSignedXml();
     },
     /**
@@ -404,6 +622,10 @@ const libSaml = () => {
         let verified = false;
 
         sig.signatureAlgorithm = opts.signatureAlgorithm!;
+        
+        // Register ECDSA algorithms if needed for verification
+        // This ensures xml-crypto can verify ECDSA signatures
+        this.registerECDSAAlgorithms(sig);
 
         if (!opts.keyFile && !opts.metadata) {
           throw new Error('ERR_UNDEFINED_SIGNATURE_VERIFIER_OPTIONS');
@@ -583,23 +805,69 @@ const libSaml = () => {
     */
     constructMessageSignature(
       octetString: string,
-      key: string,
+      key: string | Buffer,
       passphrase?: string,
       isBase64?: boolean,
       signingAlgorithm?: string
     ) {
-      // Default returning base64 encoded signature
-      // Embed with node-rsa module
-      const decryptedKey = new nrsa(
-        utility.readPrivateKey(key, passphrase),
-        undefined,
-        {
-          signingScheme: getSigningScheme(signingAlgorithm),
+      // Convert key to string if it's a Buffer
+      const keyString = Buffer.isBuffer(key) ? key.toString('utf8') : key;
+      
+      // Detect key type - readPrivateKey now properly handles encrypted PKCS#8 for both RSA and EC
+      const decryptedKeyString = utility.readPrivateKey(keyString, passphrase);
+      const keyType = utility.detectKeyType(decryptedKeyString);
+      
+      // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+      // For EC keys, default to SHA256 if not specified
+      let algorithm = utility.normalizeSignatureAlgorithm(signingAlgorithm, keyType);
+      if (!algorithm && keyType === 'EC') {
+        algorithm = signatureAlgorithms.ECDSA_SHA256;
+      }
+      // Note: For RSA, algorithm can be undefined - getSigningScheme will default to SHA-1 (backward compatible)
+      
+      if (keyType === 'EC') {
+        // Use Node's crypto module for EC signing (synchronous)
+        // Use the decrypted key from readPrivateKey
+        const pemKey = decryptedKeyString;
+        
+        // Determine hash algorithm from signing algorithm (algorithm is guaranteed to be set for EC)
+        const effectiveAlgorithm = algorithm!; // Non-null assertion: we set default above for EC keys
+        let hashAlgorithm = 'SHA256';
+        if (effectiveAlgorithm.includes('sha384')) {
+          hashAlgorithm = 'SHA384';
+        } else if (effectiveAlgorithm.includes('sha512')) {
+          hashAlgorithm = 'SHA512';
+        } else if (effectiveAlgorithm.includes('sha1')) {
+          hashAlgorithm = 'SHA1';
         }
-      );
-      const signature = decryptedKey.sign(octetString);
-      // Use private key to sign data
-      return isBase64 !== false ? signature.toString('base64') : signature;
+        
+        const sign = nodeCrypto.createSign(hashAlgorithm);
+        sign.update(octetString);
+        const derSignature = sign.sign({
+          key: pemKey,
+          format: 'pem',
+          type: 'pkcs8'
+          // No passphrase needed - key is already decrypted
+        });
+        
+        // Convert DER signature to IEEE P1363 format for ECDSA
+        const p1363Signature = utility.derToP1363(derSignature);
+        
+        return isBase64 !== false ? p1363Signature.toString('base64') : p1363Signature;
+      } else {
+        // RSA signing using node-rsa
+        // Default returning base64 encoded signature
+        const decryptedKey = new nrsa(
+          decryptedKeyString, // Use the already-decrypted key
+          undefined,
+          {
+            signingScheme: getSigningScheme(algorithm),
+          }
+        );
+        const signature = decryptedKey.sign(octetString);
+        // Use private key to sign data
+        return isBase64 !== false ? signature.toString('base64') : signature;
+      }
     },
     /**
     * @desc Verifies message signature
@@ -607,7 +875,7 @@ const libSaml = () => {
     * @param  {string} octetString                see "Bindings for the OASIS Security Assertion Markup Language (SAML V2.0)" P.17/46
     * @param  {string} signature                  context of XML signature
     * @param  {string} verifyAlgorithm            algorithm used to verify
-    * @return {boolean} verification result
+    * @return {Promise<boolean>} verification result
     */
     verifyMessageSignature(
       metadata,
@@ -615,10 +883,7 @@ const libSaml = () => {
       signature: string | Buffer,
       verifyAlgorithm?: string
     ) {
-      const signCert = metadata.getX509Certificate(certUse.signing);
-      const signingScheme = getSigningScheme(verifyAlgorithm);
-      const key = new nrsa(utility.getPublicKeyPemFromCertificate(signCert), 'public', { signingScheme });
-      return key.verify(Buffer.from(octetString), Buffer.from(signature));
+      return verifyMessageSignature(metadata, octetString, signature, verifyAlgorithm);
     },
     /**
     * @desc Get the public key in string format

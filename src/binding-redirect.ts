@@ -60,7 +60,23 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
     relayState = pvPair(urlParams.relayState, encodeURIComponent(relayState));
   }
   if (isSigned) {
-    const sigAlg = pvPair(urlParams.sigAlg, encodeURIComponent(entitySetting.requestSignatureAlgorithm));
+    // Detect key type to determine the correct signature algorithm
+    const keyString = Buffer.isBuffer(entitySetting.privateKey) 
+      ? entitySetting.privateKey.toString('utf8') 
+      : entitySetting.privateKey;
+    
+    // Decrypt the key first if encrypted, then detect type
+    // readPrivateKey now handles encrypted PKCS#8 for both RSA and EC
+    const decryptedKeyString = utility.readPrivateKey(keyString, entitySetting.privateKeyPass);
+    const keyType = utility.detectKeyType(decryptedKeyString);
+    
+    // Normalize signature algorithm based on key type (converts RSA→ECDSA if needed)
+    const signatureAlgorithm = utility.normalizeSignatureAlgorithm(
+      entitySetting.requestSignatureAlgorithm,
+      keyType
+    ) || entitySetting.requestSignatureAlgorithm; // Fallback to original if no normalization needed
+    
+    const sigAlg = pvPair(urlParams.sigAlg, encodeURIComponent(signatureAlgorithm));
     const octetString = samlRequest + relayState + sigAlg;
     return baseUrl
       + pvPair(queryParam, octetString, noParams)
@@ -70,7 +86,7 @@ function buildRedirectURL(opts: BuildRedirectConfig) {
           entitySetting.privateKey,
           entitySetting.privateKeyPass,
           undefined,
-          entitySetting.requestSignatureAlgorithm
+          signatureAlgorithm
         ).toString()
       )
       );
