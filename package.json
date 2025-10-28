@@ -19,7 +19,6 @@
     "pretest": "make pretest",
     "test": "NODE_ENV=test nyc ava",
     "coverage": "nyc report --reporter=text-lcov | coveralls",
-    "hooks:postinstall": "ln -sf $PWD/.pre-commit.sh $PWD/.git/hooks/pre-commit",
     "publish:dist": "./scripts/publish-dist.sh"
   },
   "contributors": [
