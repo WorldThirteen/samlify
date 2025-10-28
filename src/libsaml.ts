@@ -10,23 +10,14 @@ import { select } from 'xpath';
 import { MetadataInterface } from './metadata';
 import nrsa, { SigningSchemeHash } from 'node-rsa';
 import { SignedXml } from 'xml-crypto';
-import * as xmldsigjs from 'xmldsigjs';
 import * as xmlenc from '@authenio/xml-encryption';
-import { extract } from './extractor';
 import camelCase from 'camelcase';
 import { getContext } from './api';
 import xmlEscape from 'xml-escape';
 import * as fs from 'fs';
 import {DOMParser} from '@xmldom/xmldom';
-import { Crypto } from '@peculiar/webcrypto';
-import * as x509 from '@peculiar/x509';
 import { verifyMessageSignature } from './verify';
 import * as nodeCrypto from 'crypto';
-
-const crypto = new Crypto();
-const webcrypto = crypto;
-
-xmldsigjs.Application.setEngine('NodeJS', crypto);
 
 const signatureAlgorithms = algorithms.signature;
 const digestAlgorithms = algorithms.digest;

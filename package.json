@@ -48,7 +48,6 @@
     "xml": "^1.0.1",
     "xml-crypto": "^6.1.2",
     "xml-escape": "^1.1.0",
-    "xmldsigjs": "^2.8.1",
     "xpath": "^0.0.32"
   },
   "devDependencies": {
@@ -79,5 +78,5 @@
       "!**/*.d.ts"
     ]
   },
-  "packageManager": "yarn@4.9.1+sha256.6ffc213b3ce0af5c92507977d9537ea3cc085caa52d1c3f08e94d613407fed19"
+  "packageManager": "yarn@1.22.22"
 }

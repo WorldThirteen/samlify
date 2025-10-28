@@ -4,17 +4,13 @@
 * @desc  Library for some common functions (e.g. de/inflation, en/decoding)
 */
 import { pki, util, asn1 } from 'node-forge';
-import * as xmldsigjs from 'xmldsigjs';
 import * as x509 from '@peculiar/x509';
-import * as webcrypto from '@peculiar/webcrypto';
 import { inflate, deflate } from 'pako';
 import { AsnParser } from '@peculiar/asn1-schema';
 import { PrivateKeyInfo } from '@peculiar/asn1-pkcs8';
 import { id_rsaEncryption } from '@peculiar/asn1-rsa';
 import { id_ecPublicKey } from '@peculiar/asn1-ecc';
 import { algorithms } from './urn';
-
-const crypto = new webcrypto.Crypto();
 
 const BASE64_STR = 'base64';
 
